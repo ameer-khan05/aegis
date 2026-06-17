@@ -148,6 +148,30 @@ async def get_summary() -> dict[str, int]:
     }
 
 
+async def has_active_entry(finding_key: str) -> bool:
+    """Check if a finding already has an active (non-terminal) audit entry."""
+    active_statuses = ("pending", "in_progress", "fixed")
+    placeholders = ", ".join(["?"] * len(active_statuses))
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            f"SELECT COUNT(*) FROM audit_log WHERE finding_key = ? AND status IN ({placeholders})",
+            [finding_key, *active_statuses],
+        )
+        row = await cursor.fetchone()
+        return bool(row and row[0] > 0)
+
+
+async def has_scan_run(scan_task_id: str) -> bool:
+    """Check if a scan run has already been processed."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE scan_task_id = ?",
+            [scan_task_id],
+        )
+        row = await cursor.fetchone()
+        return bool(row and row[0] > 0)
+
+
 async def get_scan_runs() -> list[str]:
     """Get distinct scan task IDs for the filter dropdown."""
     async with aiosqlite.connect(DB_PATH) as db:

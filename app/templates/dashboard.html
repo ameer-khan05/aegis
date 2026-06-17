@@ -109,8 +109,9 @@
   </div>
 
   <div class="cap-note">
-    <strong>Session cap:</strong> {{ max_sessions_per_run }} per run (MAX_SESSIONS_PER_RUN).
+    <strong>Caps:</strong> {{ max_findings_per_run }} findings fetched, {{ max_sessions_per_run }} sessions launched per run.
     {{ summary.findings_detected }} detected, {{ summary.sessions_triggered }} remediated — {{ summary.skipped }} skipped intentionally.
+    Duplicate findings and repeat webhooks are automatically rejected.
   </div>
 
   <!-- Filters -->
