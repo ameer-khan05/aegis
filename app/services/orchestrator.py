@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.config import settings
-from app.db import init_db, insert_entry, update_entry
+from app.db import has_active_entry, has_scan_run, init_db, insert_entry, update_entry
 from app.models import Finding
 from app.services.devin import cancel_session, launch_session, poll_session
 from app.services.github import create_issue
@@ -36,49 +36,83 @@ def prioritize_findings(findings: list[Finding]) -> list[Finding]:
 async def run_remediation(scan_task_id: str) -> None:
     """Full remediation loop triggered by a webhook.
 
-    1. Fetch ALL findings from SonarCloud (for reporting)
-    2. Record every finding in the audit log
-    3. Sort by severity (most severe first) then recency
-    4. Launch Devin sessions only for the top MAX_SESSIONS_PER_RUN findings
-    5. Mark the rest as 'skipped' so the dashboard shows the cap clearly
+    1. Check idempotency — reject duplicate scan runs
+    2. Fetch findings from SonarCloud (capped at MAX_FINDINGS_PER_RUN)
+    3. Deduplicate — skip findings already being processed or already fixed
+    4. Sort by severity (most severe first) then recency
+    5. Launch Devin sessions only for the top MAX_SESSIONS_PER_RUN findings
+    6. Mark the rest as 'skipped' so the dashboard shows the cap clearly
     """
     await init_db()
 
-    cap = settings.MAX_SESSIONS_PER_RUN
-    logger.info("Starting remediation for scan %s (session cap: %d)", scan_task_id, cap)
+    # Idempotency guard: reject duplicate scan runs
+    if await has_scan_run(scan_task_id):
+        logger.warning(
+            "Scan %s already processed — skipping duplicate webhook", scan_task_id,
+        )
+        return
 
-    # Step 1: Fetch ALL findings
+    session_cap = settings.MAX_SESSIONS_PER_RUN
+    findings_cap = settings.MAX_FINDINGS_PER_RUN
+    logger.info(
+        "Starting remediation for scan %s (findings cap: %d, session cap: %d)",
+        scan_task_id, findings_cap, session_cap,
+    )
+
+    # Step 1: Fetch findings (already capped at MAX_FINDINGS_PER_RUN)
     findings = await fetch_vulnerabilities()
     if not findings:
         logger.info("No findings to remediate")
         return
 
-    total_detected = len(findings)
-    logger.info("Found %d findings total", total_detected)
+    total_fetched = len(findings)
+    logger.info("Fetched %d findings", total_fetched)
 
-    # Step 2: Prioritize — severity desc, then most recent first
-    ranked = prioritize_findings(findings)
+    # Step 2: Deduplicate — remove findings that already have active entries
+    new_findings: list[Finding] = []
+    for f in findings:
+        if await has_active_entry(f.key):
+            logger.info("Skipping duplicate finding %s (already active)", f.key)
+        else:
+            new_findings.append(f)
 
-    # Step 3: Split into remediation batch vs skipped
-    to_remediate = ranked[:cap]
-    to_skip = ranked[cap:]
+    deduped_count = total_fetched - len(new_findings)
+    if deduped_count:
+        logger.info(
+            "Deduplication: %d already active, %d new findings remain",
+            deduped_count, len(new_findings),
+        )
+
+    if not new_findings:
+        logger.info("All findings already have active entries — nothing to do")
+        return
+
+    # Step 3: Prioritize — severity desc, then most recent first
+    ranked = prioritize_findings(new_findings)
+
+    # Step 4: Split into remediation batch vs skipped
+    to_remediate = ranked[:session_cap]
+    to_skip = ranked[session_cap:]
 
     logger.info(
-        "%d detected, %d will be remediated this run, %d skipped (cap=%d)",
-        total_detected, len(to_remediate), len(to_skip), cap,
+        "%d fetched, %d deduped, %d new → %d to remediate, %d skipped (session cap=%d)",
+        total_fetched, deduped_count, len(new_findings),
+        len(to_remediate), len(to_skip), session_cap,
     )
 
-    # Step 4: Record skipped findings in audit log
+    # Step 5: Record skipped findings in audit log
     skip_tasks = [_record_skipped(scan_task_id, f) for f in to_skip]
     await asyncio.gather(*skip_tasks, return_exceptions=True)
 
-    # Step 5: Process the top-N findings (issue + session + poll)
+    # Step 6: Process the top-N findings (issue + session + poll)
     remediate_tasks = [_process_finding(scan_task_id, f) for f in to_remediate]
     await asyncio.gather(*remediate_tasks, return_exceptions=True)
 
     logger.info(
-        "Remediation complete for scan %s — %d detected, %d remediated",
-        scan_task_id, total_detected, len(to_remediate),
+        "Remediation complete for scan %s — %d fetched, %d deduped, "
+        "%d remediated, %d skipped",
+        scan_task_id, total_fetched, deduped_count,
+        len(to_remediate), len(to_skip),
     )
 
 

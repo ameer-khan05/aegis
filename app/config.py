@@ -1,6 +1,12 @@
 """Aegis configuration via Pydantic Settings — loads from .env file."""
 
+import logging
+
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
+
+SEVERITY_LEVELS = ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
 
 
 class Settings(BaseSettings):
@@ -24,9 +30,30 @@ class Settings(BaseSettings):
     AEGIS_MAX_ACU: int = 15
     AEGIS_POLL_INTERVAL: int = 30  # seconds
     AEGIS_SESSION_TIMEOUT: int = 1200  # 20 minutes
+    MAX_FINDINGS_PER_RUN: int = 10  # cap on total findings fetched per run
     MAX_SESSIONS_PER_RUN: int = 5  # cap on Devin sessions launched per webhook run
+
+    @property
+    def severity_filter(self) -> str:
+        """Expand AEGIS_MIN_SEVERITY into a comma-separated list of all
+        severities at or above the configured minimum."""
+        threshold = self.AEGIS_MIN_SEVERITY.strip().upper()
+        if threshold not in SEVERITY_LEVELS:
+            return threshold
+        idx = SEVERITY_LEVELS.index(threshold)
+        return ",".join(SEVERITY_LEVELS[: idx + 1])
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
 settings = Settings()
+
+logger.info(
+    "Aegis config loaded: MAX_FINDINGS_PER_RUN=%d, MAX_SESSIONS_PER_RUN=%d, "
+    "AEGIS_MIN_SEVERITY=%s (filter=%s), AEGIS_ISSUE_TYPES=%s",
+    settings.MAX_FINDINGS_PER_RUN,
+    settings.MAX_SESSIONS_PER_RUN,
+    settings.AEGIS_MIN_SEVERITY,
+    settings.severity_filter,
+    settings.AEGIS_ISSUE_TYPES,
+)

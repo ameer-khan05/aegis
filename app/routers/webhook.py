@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Request, Response
 
 from app.config import settings
+from app.db import has_scan_run, init_db
 from app.services.orchestrator import run_remediation
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,17 @@ async def sonar_webhook(
         logger.info("Skipping: analysis status is %s (not SUCCESS)", status)
         return Response(status_code=200, content="skipped: not SUCCESS")
 
+    # Idempotency check: reject duplicate task IDs early
+    await init_db()
+    if await has_scan_run(task_id):
+        logger.warning("Webhook rejected: scan %s already processed", task_id)
+        return Response(status_code=200, content="skipped: already processed")
+
     # Dispatch orchestration to background task
     background_tasks.add_task(run_remediation, task_id)
-    logger.info("Dispatched remediation for task %s", task_id)
+    logger.info(
+        "Dispatched remediation for task %s (findings_cap=%d, session_cap=%d)",
+        task_id, settings.MAX_FINDINGS_PER_RUN, settings.MAX_SESSIONS_PER_RUN,
+    )
 
     return Response(status_code=200, content="accepted")

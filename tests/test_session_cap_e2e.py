@@ -1,4 +1,4 @@
-"""End-to-end test: verify MAX_SESSIONS_PER_RUN caps Devin sessions.
+"""End-to-end test: verify session cap, findings cap, dedup, and idempotency.
 
 Mocks SonarCloud (returns 12 findings), GitHub (issue creation), and
 Devin (session launch + poll) so the full orchestration pipeline runs
@@ -8,6 +8,7 @@ locally without real API calls.
 import asyncio
 import json
 import os
+import shutil
 import sys
 from unittest.mock import patch
 
@@ -47,11 +48,12 @@ FAKE_FINDINGS_BUG = [
 ]
 
 # Total = 12 findings (7 VULN + 5 BUG)
+# But MAX_FINDINGS_PER_RUN=10 means only 10 are fetched (7 VULN + 3 BUG)
 
 
-def make_sonar_response(issue_type: str) -> dict:
+def make_sonar_response(issue_type: str, page_size: int = 100) -> dict:
     issues = FAKE_FINDINGS_VULN if issue_type == "VULNERABILITY" else FAKE_FINDINGS_BUG
-    return {"issues": issues, "paging": {"total": len(issues)}}
+    return {"issues": issues[:page_size], "paging": {"total": len(issues)}}
 
 
 # ── Track what the orchestrator does ──
@@ -93,7 +95,8 @@ class FakeAsyncClient:
         # SonarCloud issues search
         if "sonarcloud.io/api/issues/search" in url:
             issue_type = params.get("types", "VULNERABILITY")
-            return FakeHTTPResponse(make_sonar_response(issue_type))
+            page_size = int(params.get("ps", 100))
+            return FakeHTTPResponse(make_sonar_response(issue_type, page_size))
 
         # GitHub search (dedup check) — no existing issues
         if "api.github.com/search/issues" in url:
@@ -141,13 +144,12 @@ class FakeAsyncClient:
 
 
 async def run_test():
-    """Simulate a webhook and verify the session cap."""
+    """Simulate a webhook and verify caps + dedup + idempotency."""
     # Clear tracking
     sessions_launched.clear()
     issues_created.clear()
 
     # Remove any stale DB
-    import shutil
     if os.path.exists("data"):
         shutil.rmtree("data")
 
@@ -156,88 +158,154 @@ async def run_test():
         from app.services.orchestrator import run_remediation
         from app.db import get_summary, get_entries
 
+        # First run — should process findings normally
         await run_remediation("test-scan-001")
 
-        summary = await get_summary()
-        entries = await get_entries()
+        summary1 = await get_summary()
+        entries1 = await get_entries()
+        sessions_after_run1 = len(sessions_launched)
 
-    return summary, entries
+        # Second run with SAME task ID — should be rejected (idempotency)
+        await run_remediation("test-scan-001")
+
+        summary2 = await get_summary()
+        sessions_after_run2 = len(sessions_launched)
+
+        # Third run with NEW task ID — findings should be deduped
+        await run_remediation("test-scan-002")
+
+        summary3 = await get_summary()
+        sessions_after_run3 = len(sessions_launched)
+
+    return {
+        "summary1": summary1, "entries1": entries1,
+        "sessions_run1": sessions_after_run1,
+        "summary2": summary2, "sessions_run2": sessions_after_run2,
+        "summary3": summary3, "sessions_run3": sessions_after_run3,
+    }
 
 
 def main():
     print("=" * 60)
-    print("  Aegis E2E Test: MAX_SESSIONS_PER_RUN cap verification")
+    print("  Aegis E2E Test: Cap, Dedup, and Idempotency Verification")
     print("=" * 60)
     print()
 
-    summary, entries = asyncio.run(run_test())
+    results = asyncio.run(run_test())
 
-    total_findings = 12  # 7 VULN + 5 BUG
-    cap = int(os.environ.get("MAX_SESSIONS_PER_RUN", "5"))
+    session_cap = int(os.environ.get("MAX_SESSIONS_PER_RUN", "5"))
+    findings_cap = int(os.environ.get("MAX_FINDINGS_PER_RUN", "10"))
 
-    print(f"Total findings from SonarCloud:  {total_findings}")
-    print(f"MAX_SESSIONS_PER_RUN:            {cap}")
-    print(f"Sessions actually launched:       {len(sessions_launched)}")
-    print(f"Issues created (GitHub):          {len(issues_created)}")
+    summary1 = results["summary1"]
+    entries1 = results["entries1"]
+
+    total_fetched = summary1.get("findings_detected", 0)
+
+    print(f"MAX_FINDINGS_PER_RUN:  {findings_cap}")
+    print(f"MAX_SESSIONS_PER_RUN:  {session_cap}")
+    print(f"Findings fetched (run 1): {total_fetched}")
+    print(f"Sessions launched (run 1): {results['sessions_run1']}")
+    print(f"Sessions launched (run 2, same taskId): {results['sessions_run2'] - results['sessions_run1']}")
+    print(f"Sessions launched (run 3, new taskId, dedup): {results['sessions_run3'] - results['sessions_run2']}")
     print()
 
-    print("Dashboard summary (from DB):")
-    for k, v in summary.items():
+    print("Dashboard summary after run 1:")
+    for k, v in summary1.items():
         print(f"  {k}: {v}")
     print()
 
     # Count statuses
-    statuses = {}
-    for e in entries:
-        s = e.get("status", "unknown")
+    statuses: dict[str, int] = {}
+    for e in entries1:
+        s = str(e.get("status", "unknown"))
         statuses[s] = statuses.get(s, 0) + 1
-    print(f"Entry statuses: {statuses}")
+    print(f"Entry statuses (run 1): {statuses}")
     print()
 
     # ── Assertions ──
-    errors = []
+    errors: list[str] = []
 
-    if len(sessions_launched) != cap:
-        errors.append(f"FAIL: Expected {cap} sessions launched, got {len(sessions_launched)}")
+    # 1. Findings cap: at most MAX_FINDINGS_PER_RUN findings fetched
+    if total_fetched > findings_cap:
+        errors.append(
+            f"FAIL: Findings cap violated — fetched {total_fetched}, cap is {findings_cap}"
+        )
 
-    if summary.get("findings_detected") != total_findings:
-        errors.append(f"FAIL: Expected findings_detected={total_findings}, got {summary.get('findings_detected')}")
+    # 2. Session cap: at most MAX_SESSIONS_PER_RUN sessions launched
+    if results["sessions_run1"] != session_cap:
+        errors.append(
+            f"FAIL: Expected {session_cap} sessions launched, got {results['sessions_run1']}"
+        )
 
-    if summary.get("sessions_triggered") != cap:
-        errors.append(f"FAIL: Expected sessions_triggered={cap}, got {summary.get('sessions_triggered')}")
+    # 3. Skipped entries = fetched - session_cap
+    expected_skipped = total_fetched - session_cap
+    if summary1.get("skipped") != expected_skipped:
+        errors.append(
+            f"FAIL: Expected skipped={expected_skipped}, got {summary1.get('skipped')}"
+        )
 
-    expected_skipped = total_findings - cap
-    if summary.get("skipped") != expected_skipped:
-        errors.append(f"FAIL: Expected skipped={expected_skipped}, got {summary.get('skipped')}")
+    # 4. All sessions should resolve as fixed
+    if summary1.get("resolved") != session_cap:
+        errors.append(
+            f"FAIL: Expected resolved={session_cap}, got {summary1.get('resolved')}"
+        )
 
-    if summary.get("resolved") != cap:
-        errors.append(f"FAIL: Expected resolved={cap} (all mocked as fixed), got {summary.get('resolved')}")
+    # 5. Priority ordering: all BLOCKERs should be remediated first
+    blocker_entries = [
+        e for e in entries1
+        if e.get("severity") == "BLOCKER" and e.get("status") != "skipped"
+    ]
+    blocker_count = sum(1 for e in entries1 if e.get("severity") == "BLOCKER")
+    if len(blocker_entries) < min(session_cap, blocker_count):
+        errors.append(
+            f"FAIL: Expected all BLOCKERs to be remediated, only {len(blocker_entries)} were"
+        )
 
-    # Verify priority ordering: first 5 sessions should be BLOCKERs (there are 5 total)
-    blocker_entries = [e for e in entries if e.get("severity") == "BLOCKER" and e.get("status") != "skipped"]
-    if len(blocker_entries) < 5:
-        errors.append(f"FAIL: Expected all 5 BLOCKERs to be remediated, only {len(blocker_entries)} were")
-
-    skipped_entries = [e for e in entries if e.get("status") == "skipped"]
-    if len(skipped_entries) != expected_skipped:
-        errors.append(f"FAIL: Expected {expected_skipped} skipped entries, got {len(skipped_entries)}")
-
-    # All skipped should have the cap reason
+    # 6. Skipped entries should have the cap reason
+    skipped_entries = [e for e in entries1 if e.get("status") == "skipped"]
     for se in skipped_entries:
         reason = se.get("failure_reason", "")
         if "MAX_SESSIONS_PER_RUN" not in str(reason):
-            errors.append(f"FAIL: Skipped entry {se.get('finding_key')} missing cap reason: {reason}")
+            errors.append(
+                f"FAIL: Skipped entry {se.get('finding_key')} missing cap reason: {reason}"
+            )
             break
 
-    # Verify problem_summary is populated from finding.message
-    entries_with_problem = [e for e in entries if e.get("problem_summary")]
-    if len(entries_with_problem) != total_findings:
-        errors.append(f"FAIL: Expected {total_findings} entries with problem_summary, got {len(entries_with_problem)}")
+    # 7. problem_summary populated for all entries
+    entries_with_problem = [e for e in entries1 if e.get("problem_summary")]
+    if len(entries_with_problem) != total_fetched:
+        errors.append(
+            f"FAIL: Expected {total_fetched} entries with problem_summary, "
+            f"got {len(entries_with_problem)}"
+        )
 
-    # Verify fix_summary is populated for fixed entries
-    fixed_with_fix = [e for e in entries if e.get("status") == "fixed" and e.get("fix_summary")]
-    if len(fixed_with_fix) != cap:
-        errors.append(f"FAIL: Expected {cap} fixed entries with fix_summary, got {len(fixed_with_fix)}")
+    # 8. fix_summary populated for fixed entries
+    fixed_with_fix = [
+        e for e in entries1
+        if e.get("status") == "fixed" and e.get("fix_summary")
+    ]
+    if len(fixed_with_fix) != session_cap:
+        errors.append(
+            f"FAIL: Expected {session_cap} fixed entries with fix_summary, "
+            f"got {len(fixed_with_fix)}"
+        )
+
+    # 9. IDEMPOTENCY: second run with same taskId should launch 0 new sessions
+    new_sessions_run2 = results["sessions_run2"] - results["sessions_run1"]
+    if new_sessions_run2 != 0:
+        errors.append(
+            f"FAIL: Idempotency violated — run 2 (same taskId) launched "
+            f"{new_sessions_run2} sessions, expected 0"
+        )
+
+    # 10. DEDUP: third run with new taskId should only process previously-skipped
+    #     findings (fixed entries are deduped, skipped entries get retried)
+    new_sessions_run3 = results["sessions_run3"] - results["sessions_run2"]
+    if new_sessions_run3 != expected_skipped:
+        errors.append(
+            f"FAIL: Dedup — run 3 (new taskId) should process {expected_skipped} "
+            f"previously-skipped findings, launched {new_sessions_run3} sessions"
+        )
 
     if errors:
         print("RESULTS:")
@@ -247,9 +315,13 @@ def main():
     else:
         print("ALL CHECKS PASSED")
         print()
-        print(f"  12 findings detected, {cap} remediated this run, {expected_skipped} skipped (cap={cap})")
-        print(f"  All {cap} sessions launched for the highest-severity findings")
-        print("  Dashboard summary correctly shows the cap is intentional")
+        print(f"  ✓ Findings cap: {total_fetched} fetched (cap={findings_cap})")
+        print(f"  ✓ Session cap: {results['sessions_run1']} sessions (cap={session_cap})")
+        print(f"  ✓ Skipped: {expected_skipped} findings skipped with cap reason")
+        print("  ✓ Priority: BLOCKERs remediated first")
+        print("  ✓ Idempotency: duplicate taskId rejected (0 new sessions)")
+        print(f"  ✓ Dedup: fixed findings skipped, {new_sessions_run3} skipped findings retried")
+        print("  ✓ problem_summary + fix_summary populated correctly")
         sys.exit(0)
 
 

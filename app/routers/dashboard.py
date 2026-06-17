@@ -39,6 +39,7 @@ async def dashboard(
             "summary": summary,
             "entries": entries,
             "scan_runs": scan_runs,
+            "max_findings_per_run": settings.MAX_FINDINGS_PER_RUN,
             "max_sessions_per_run": settings.MAX_SESSIONS_PER_RUN,
             "filters": {
                 "severity": severity,
