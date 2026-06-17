@@ -47,13 +47,14 @@ FAKE_FINDINGS_BUG = [
     ])
 ]
 
-# Total = 12 findings (7 VULN + 5 BUG)
-# But MAX_FINDINGS_PER_RUN=10 means only 10 are fetched (7 VULN + 3 BUG)
+# Total = 12 findings (7 VULN + 5 BUG), all returned in one combined call.
+# MAX_FINDINGS_PER_RUN=10 means only 10 are fetched.
+ALL_FINDINGS = FAKE_FINDINGS_VULN + FAKE_FINDINGS_BUG
 
 
-def make_sonar_response(issue_type: str, page_size: int = 100) -> dict:
-    issues = FAKE_FINDINGS_VULN if issue_type == "VULNERABILITY" else FAKE_FINDINGS_BUG
-    return {"issues": issues[:page_size], "paging": {"total": len(issues)}}
+def make_sonar_response(page_size: int = 100) -> dict:
+    """Return a combined response with all issue types mixed together."""
+    return {"issues": ALL_FINDINGS[:page_size], "paging": {"total": len(ALL_FINDINGS)}}
 
 
 # ── Track what the orchestrator does ──
@@ -92,11 +93,10 @@ class FakeAsyncClient:
     async def get(self, url: str, **kwargs) -> FakeHTTPResponse:
         params = kwargs.get("params", {})
 
-        # SonarCloud issues search
+        # SonarCloud issues search — single combined call for all types
         if "sonarcloud.io/api/issues/search" in url:
-            issue_type = params.get("types", "VULNERABILITY")
             page_size = int(params.get("ps", 100))
-            return FakeHTTPResponse(make_sonar_response(issue_type, page_size))
+            return FakeHTTPResponse(make_sonar_response(page_size))
 
         # GitHub search (dedup check) — no existing issues
         if "api.github.com/search/issues" in url:
@@ -220,6 +220,14 @@ def main():
         s = str(e.get("status", "unknown"))
         statuses[s] = statuses.get(s, 0) + 1
     print(f"Entry statuses (run 1): {statuses}")
+
+    # Count types in fixed entries
+    fixed_entries = [e for e in entries1 if e.get("status") == "fixed"]
+    fixed_types: dict[str, int] = {}
+    for e in fixed_entries:
+        t = str(e.get("finding_type", "unknown"))
+        fixed_types[t] = fixed_types.get(t, 0) + 1
+    print(f"Fixed entry types (run 1): {fixed_types}")
     print()
 
     # ── Assertions ──
@@ -261,7 +269,17 @@ def main():
             f"FAIL: Expected all BLOCKERs to be remediated, only {len(blocker_entries)} were"
         )
 
-    # 6. Skipped entries should have the cap reason
+    # 6. Mixed types: remediated entries should include BOTH vulnerabilities and bugs
+    #    (5 BLOCKERs = 3 VULN + 2 BUG, so the top 5 must include both types)
+    fixed_vuln = sum(1 for e in fixed_entries if e.get("finding_type") == "VULNERABILITY")
+    fixed_bug = sum(1 for e in fixed_entries if e.get("finding_type") == "BUG")
+    if fixed_vuln == 0 or fixed_bug == 0:
+        errors.append(
+            f"FAIL: Fixed entries should include both types — got "
+            f"{fixed_vuln} VULNERABILITY, {fixed_bug} BUG"
+        )
+
+    # 7. Skipped entries should have the cap reason
     skipped_entries = [e for e in entries1 if e.get("status") == "skipped"]
     for se in skipped_entries:
         reason = se.get("failure_reason", "")
@@ -271,7 +289,7 @@ def main():
             )
             break
 
-    # 7. problem_summary populated for all entries
+    # 8. problem_summary populated for all entries
     entries_with_problem = [e for e in entries1 if e.get("problem_summary")]
     if len(entries_with_problem) != total_fetched:
         errors.append(
@@ -279,7 +297,7 @@ def main():
             f"got {len(entries_with_problem)}"
         )
 
-    # 8. fix_summary populated for fixed entries
+    # 9. fix_summary populated for fixed entries
     fixed_with_fix = [
         e for e in entries1
         if e.get("status") == "fixed" and e.get("fix_summary")
@@ -290,7 +308,7 @@ def main():
             f"got {len(fixed_with_fix)}"
         )
 
-    # 9. IDEMPOTENCY: second run with same taskId should launch 0 new sessions
+    # 10. IDEMPOTENCY: second run with same taskId should launch 0 new sessions
     new_sessions_run2 = results["sessions_run2"] - results["sessions_run1"]
     if new_sessions_run2 != 0:
         errors.append(
@@ -298,7 +316,7 @@ def main():
             f"{new_sessions_run2} sessions, expected 0"
         )
 
-    # 10. DEDUP: third run with new taskId should only process previously-skipped
+    # 11. DEDUP: third run with new taskId should only process previously-skipped
     #     findings (fixed entries are deduped, skipped entries get retried)
     new_sessions_run3 = results["sessions_run3"] - results["sessions_run2"]
     if new_sessions_run3 != expected_skipped:
@@ -319,6 +337,7 @@ def main():
         print(f"  ✓ Session cap: {results['sessions_run1']} sessions (cap={session_cap})")
         print(f"  ✓ Skipped: {expected_skipped} findings skipped with cap reason")
         print("  ✓ Priority: BLOCKERs remediated first")
+        print(f"  ✓ Mixed types: {fixed_vuln} VULN + {fixed_bug} BUG in top {session_cap}")
         print("  ✓ Idempotency: duplicate taskId rejected (0 new sessions)")
         print(f"  ✓ Dedup: fixed findings skipped, {new_sessions_run3} skipped findings retried")
         print("  ✓ problem_summary + fix_summary populated correctly")
