@@ -6,6 +6,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
+COPY tests/ ./tests/
+COPY simulate.py .
+
+RUN mkdir -p data
 
 EXPOSE 8000
 

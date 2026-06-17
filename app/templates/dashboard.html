@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aegis — Security Remediation Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; margin-bottom: 2rem; font-size: 0.95rem; }
+
+    /* KPI Cards */
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    .kpi-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; text-align: center; }
+    .kpi-card .value { font-size: 2.5rem; font-weight: 700; }
+    .kpi-card .label { color: #94a3b8; font-size: 0.85rem; margin-top: 0.25rem; }
+    .kpi-card.findings .value { color: #f59e0b; }
+    .kpi-card.sessions .value { color: #3b82f6; }
+    .kpi-card.resolved .value { color: #22c55e; }
+    .kpi-card.failed .value { color: #ef4444; }
+
+    /* Filters */
+    .filters { display: flex; gap: 1rem; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap; }
+    .filters label { color: #94a3b8; font-size: 0.85rem; }
+    .filters select { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.9rem; }
+    .filters button { background: #3b82f6; color: white; border: none; border-radius: 6px; padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem; }
+    .filters button:hover { background: #2563eb; }
+    .filters a { color: #94a3b8; font-size: 0.85rem; text-decoration: none; }
+    .filters a:hover { color: #e2e8f0; }
+
+    /* Audit Table */
+    .audit-table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 12px; overflow: hidden; }
+    .audit-table th { background: #334155; padding: 0.75rem 1rem; text-align: left; font-size: 0.8rem; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.05em; }
+    .audit-table td { padding: 0.75rem 1rem; border-top: 1px solid #1e293b; font-size: 0.9rem; }
+    .audit-table tr:hover { background: #263548; }
+
+    /* Status badges */
+    .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .badge.fixed { background: #166534; color: #86efac; }
+    .badge.failed { background: #7f1d1d; color: #fca5a5; }
+    .badge.in_progress { background: #1e3a5f; color: #93c5fd; }
+    .badge.pending { background: #3f3f46; color: #d4d4d8; }
+    .badge.timed_out { background: #78350f; color: #fde68a; }
+    .badge.error { background: #7f1d1d; color: #fca5a5; }
+
+    .badge.blocker { background: #7f1d1d; color: #fca5a5; }
+    .badge.critical { background: #78350f; color: #fde68a; }
+
+    a { color: #60a5fa; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .empty { text-align: center; padding: 3rem; color: #64748b; }
+
+    /* Auto-refresh indicator */
+    .refresh-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .refresh-dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block; margin-right: 0.5rem; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  </style>
+</head>
+<body>
+  <div class="refresh-bar">
+    <div>
+      <h1>Aegis Dashboard</h1>
+      <p class="subtitle">Security Remediation Orchestrator — Executive Summary</p>
+    </div>
+    <div style="color: #64748b; font-size: 0.85rem;">
+      <span class="refresh-dot"></span> Auto-refreshes every 30s
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid">
+    <div class="kpi-card findings">
+      <div class="value">{{ summary.findings_detected }}</div>
+      <div class="label">Findings Detected</div>
+    </div>
+    <div class="kpi-card sessions">
+      <div class="value">{{ summary.sessions_triggered }}</div>
+      <div class="label">Sessions Triggered</div>
+    </div>
+    <div class="kpi-card resolved">
+      <div class="value">{{ summary.resolved }}</div>
+      <div class="label">Resolved</div>
+    </div>
+    <div class="kpi-card failed">
+      <div class="value">{{ summary.failed }}</div>
+      <div class="label">Failed</div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <form class="filters" method="GET" action="/dashboard">
+    <div>
+      <label for="severity">Severity</label><br>
+      <select name="severity" id="severity">
+        <option value="">All</option>
+        <option value="BLOCKER" {{ 'selected' if filters.severity == 'BLOCKER' }}>BLOCKER</option>
+        <option value="CRITICAL" {{ 'selected' if filters.severity == 'CRITICAL' }}>CRITICAL</option>
+      </select>
+    </div>
+    <div>
+      <label for="status">Status</label><br>
+      <select name="status" id="status">
+        <option value="">All</option>
+        <option value="fixed" {{ 'selected' if filters.status == 'fixed' }}>Fixed</option>
+        <option value="failed" {{ 'selected' if filters.status == 'failed' }}>Failed</option>
+        <option value="in_progress" {{ 'selected' if filters.status == 'in_progress' }}>In Progress</option>
+        <option value="timed_out" {{ 'selected' if filters.status == 'timed_out' }}>Timed Out</option>
+        <option value="pending" {{ 'selected' if filters.status == 'pending' }}>Pending</option>
+      </select>
+    </div>
+    <div>
+      <label for="scan_run">Scan Run</label><br>
+      <select name="scan_run" id="scan_run">
+        <option value="">All</option>
+        {% for run in scan_runs %}
+        <option value="{{ run }}" {{ 'selected' if filters.scan_run == run }}>{{ run }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="align-self: flex-end;">
+      <button type="submit">Apply</button>
+      <a href="/dashboard" style="margin-left: 0.5rem;">Reset</a>
+    </div>
+  </form>
+
+  <!-- Audit Table -->
+  {% if entries %}
+  <table class="audit-table">
+    <thead>
+      <tr>
+        <th>Finding</th>
+        <th>Rule</th>
+        <th>Severity</th>
+        <th>Status</th>
+        <th>File</th>
+        <th>Issue</th>
+        <th>PR</th>
+        <th>Session</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td title="{{ e.finding_key }}">{{ e.finding_key[:12] }}…</td>
+        <td>{{ e.finding_rule }}</td>
+        <td><span class="badge {{ e.severity | lower }}">{{ e.severity }}</span></td>
+        <td><span class="badge {{ e.status }}">{{ e.status | replace('_', ' ') }}</span></td>
+        <td title="{{ e.finding_file }}">{{ e.finding_file.split(':')[-1] if ':' in (e.finding_file or '') else e.finding_file }}</td>
+        <td>{% if e.github_issue_url %}<a href="{{ e.github_issue_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
+        <td>{% if e.pr_url %}<a href="{{ e.pr_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
+        <td>{% if e.devin_session_url %}<a href="{{ e.devin_session_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">
+    <p>No findings recorded yet.</p>
+    <p style="margin-top: 0.5rem; font-size: 0.85rem;">Trigger a SonarCloud scan or use simulation mode to see results here.</p>
+  </div>
+  {% endif %}
+
+  <script>
+    // Auto-refresh every 30 seconds
+    setTimeout(() => location.reload(), 30000);
+  </script>
+</body>
+</html>
