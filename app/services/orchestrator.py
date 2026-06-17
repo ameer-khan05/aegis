@@ -95,6 +95,7 @@ async def _record_skipped(scan_task_id: str, finding: Finding) -> None:
         "severity": finding.severity,
         "status": "skipped",
         "failure_reason": f"Exceeded MAX_SESSIONS_PER_RUN ({settings.MAX_SESSIONS_PER_RUN})",
+        "problem_summary": finding.message,
     }
     await insert_entry(entry)
 
@@ -113,6 +114,7 @@ async def _process_finding(scan_task_id: str, finding: Finding) -> None:
         "finding_type": finding.type,
         "severity": finding.severity,
         "status": "pending",
+        "problem_summary": finding.message,
     }
     await insert_entry(entry)
 
@@ -154,6 +156,7 @@ async def _process_finding(scan_task_id: str, finding: Finding) -> None:
         "pr_url": result.pr_url,
         "tests_passed": 1 if result.tests_passed else 0,
         "failure_reason": result.failure_reason,
+        "fix_summary": result.fix_summary,
     })
 
     logger.info(

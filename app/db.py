@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
     tests_passed INTEGER,
     failure_reason TEXT,
     acu_consumed REAL DEFAULT 0.0,
-    duration_seconds INTEGER
+    duration_seconds INTEGER,
+    problem_summary TEXT,
+    fix_summary TEXT
 )
 """
 
@@ -48,6 +50,7 @@ async def insert_entry(entry: dict[str, object]) -> int:
         "finding_file", "finding_type", "severity", "github_issue_url", "devin_session_id",
         "devin_session_url", "status", "pr_url", "tests_passed",
         "failure_reason", "acu_consumed", "duration_seconds",
+        "problem_summary", "fix_summary",
     ]
     values = [entry.get(c) for c in cols]
     placeholders = ", ".join(["?"] * len(cols))
