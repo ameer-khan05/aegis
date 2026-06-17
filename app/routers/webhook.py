@@ -54,11 +54,6 @@ async def sonar_webhook(
         quality_gate,
     )
 
-    # Gate: only proceed if analysis completed successfully
-    if status != "SUCCESS":
-        logger.info("Skipping: analysis status is %s (not SUCCESS)", status)
-        return Response(status_code=200, content="skipped: not SUCCESS")
-
     # Idempotency check: reject duplicate task IDs early
     await init_db()
     if await has_scan_run(task_id):
