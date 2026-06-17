@@ -25,6 +25,7 @@ class SessionResult(BaseModel):
     pr_url: str | None = None
     failure_reason: str | None = None
     fix_summary: str | None = None
+    acu_consumed: float = 0.0
 
 
 class AuditEntry(BaseModel):

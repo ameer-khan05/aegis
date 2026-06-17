@@ -171,6 +171,7 @@ async def cancel_session(session_id: str) -> bool:
 
 def _extract_result(data: dict[str, object], session_id: str) -> SessionResult:
     """Parse structured_output from session response, with fallback."""
+    acus = float(data.get("acus_consumed", 0) or 0)
     structured = data.get("structured_output")
     if isinstance(structured, dict):
         return SessionResult(
@@ -180,6 +181,7 @@ def _extract_result(data: dict[str, object], session_id: str) -> SessionResult:
             pr_url=structured.get("pr_url"),  # type: ignore[arg-type]
             failure_reason=structured.get("failure_reason"),  # type: ignore[arg-type]
             fix_summary=structured.get("fix_summary"),  # type: ignore[arg-type]
+            acu_consumed=acus,
         )
 
     status = str(data.get("status", "error"))
@@ -189,4 +191,5 @@ def _extract_result(data: dict[str, object], session_id: str) -> SessionResult:
         tests_passed=False,
         pr_url=None,
         failure_reason=f"Session {session_id} ended with status={status}, no structured output",
+        acu_consumed=acus,
     )

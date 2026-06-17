@@ -11,7 +11,7 @@
     .subtitle { color: #94a3b8; margin-bottom: 2rem; font-size: 0.95rem; }
 
     /* KPI Cards */
-    .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 0.75rem; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1rem; margin-bottom: 0.75rem; }
     .kpi-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; text-align: center; }
     .kpi-card .value { font-size: 2.5rem; font-weight: 700; }
     .kpi-card .label { color: #94a3b8; font-size: 0.85rem; margin-top: 0.25rem; }
@@ -20,6 +20,7 @@
     .kpi-card.resolved .value { color: #22c55e; }
     .kpi-card.failed .value { color: #ef4444; }
     .kpi-card.skipped .value { color: #94a3b8; }
+    .kpi-card.cost .value { color: #a78bfa; }
 
     .cap-note { color: #64748b; font-size: 0.8rem; margin-bottom: 2rem; padding: 0.5rem 0.75rem; background: #1e293b; border-radius: 8px; border-left: 3px solid #3b82f6; }
     .cap-note strong { color: #94a3b8; }
@@ -106,6 +107,10 @@
       <div class="value">{{ summary.skipped }}</div>
       <div class="label">Skipped (Cap)</div>
     </div>
+    <div class="kpi-card cost">
+      <div class="value">{{ '%.1f' % summary.total_acu }}</div>
+      <div class="label">Total ACU Cost</div>
+    </div>
   </div>
 
   <div class="cap-note">
@@ -175,6 +180,7 @@
         <th>File</th>
         <th>Issue</th>
         <th>PR</th>
+        <th>Cost (ACU)</th>
         <th>Session</th>
         <th>Action</th>
       </tr>
@@ -192,6 +198,7 @@
         <td title="{{ e.finding_file }}">{{ e.finding_file.split(':')[-1] if ':' in (e.finding_file or '') else e.finding_file }}</td>
         <td>{% if e.github_issue_url %}<a href="{{ e.github_issue_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
         <td>{% if e.pr_url %}<a href="{{ e.pr_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
+        <td>{% if e.acu_consumed %}{{ '%.2f' % e.acu_consumed }}{% else %}—{% endif %}</td>
         <td>{% if e.devin_session_url %}<a href="{{ e.devin_session_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
         <td>
           {% if e.status == 'in_progress' and e.devin_session_id %}

@@ -111,7 +111,7 @@ async def get_entries(
         return [dict(row) for row in rows]
 
 
-async def get_summary() -> dict[str, int]:
+async def get_summary() -> dict[str, int | float]:
     """Compute KPI summary numbers."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("SELECT COUNT(*) FROM audit_log")
@@ -138,6 +138,10 @@ async def get_summary() -> dict[str, int]:
         row = await cursor.fetchone()
         cancelled = row[0] if row else 0
 
+        cursor = await db.execute("SELECT COALESCE(SUM(acu_consumed), 0) FROM audit_log")
+        row = await cursor.fetchone()
+        total_acu = round(row[0], 2) if row else 0.0
+
     return {
         "findings_detected": total,
         "sessions_triggered": sessions,
@@ -145,6 +149,7 @@ async def get_summary() -> dict[str, int]:
         "failed": failed,
         "skipped": skipped,
         "cancelled": cancelled,
+        "total_acu": total_acu,
     }
 
 

@@ -191,11 +191,12 @@ async def _process_finding(scan_task_id: str, finding: Finding) -> None:
         "tests_passed": 1 if result.tests_passed else 0,
         "failure_reason": result.failure_reason,
         "fix_summary": result.fix_summary,
+        "acu_consumed": result.acu_consumed,
     })
 
     logger.info(
-        "Finding %s: status=%s fixed=%s pr=%s",
-        finding.key, status, result.fixed, result.pr_url,
+        "Finding %s: status=%s fixed=%s pr=%s acu=%.2f",
+        finding.key, status, result.fixed, result.pr_url, result.acu_consumed,
     )
 
 
