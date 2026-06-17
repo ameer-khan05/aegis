@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Aegis — Security Remediation Dashboard</title>
+  <title>Aegis — Remediation Dashboard</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
@@ -47,6 +47,10 @@
     .badge.blocker { background: #7f1d1d; color: #fca5a5; }
     .badge.critical { background: #78350f; color: #fde68a; }
 
+    /* Type badges */
+    .badge.vulnerability { background: #581c87; color: #d8b4fe; }
+    .badge.bug { background: #713f12; color: #fde68a; }
+
     a { color: #60a5fa; text-decoration: none; }
     a:hover { text-decoration: underline; }
     .empty { text-align: center; padding: 3rem; color: #64748b; }
@@ -61,7 +65,7 @@
   <div class="refresh-bar">
     <div>
       <h1>Aegis Dashboard</h1>
-      <p class="subtitle">Security Remediation Orchestrator — Executive Summary</p>
+      <p class="subtitle">Vulnerability &amp; Bug Remediation Orchestrator — Executive Summary</p>
     </div>
     <div style="color: #64748b; font-size: 0.85rem;">
       <span class="refresh-dot"></span> Auto-refreshes every 30s
@@ -90,6 +94,14 @@
 
   <!-- Filters -->
   <form class="filters" method="GET" action="/dashboard">
+    <div>
+      <label for="issue_type">Type</label><br>
+      <select name="issue_type" id="issue_type">
+        <option value="">All</option>
+        <option value="VULNERABILITY" {{ 'selected' if filters.issue_type == 'VULNERABILITY' }}>Vulnerability</option>
+        <option value="BUG" {{ 'selected' if filters.issue_type == 'BUG' }}>Bug</option>
+      </select>
+    </div>
     <div>
       <label for="severity">Severity</label><br>
       <select name="severity" id="severity">
@@ -131,6 +143,7 @@
       <tr>
         <th>Finding</th>
         <th>Rule</th>
+        <th>Type</th>
         <th>Severity</th>
         <th>Status</th>
         <th>File</th>
@@ -144,6 +157,7 @@
       <tr>
         <td title="{{ e.finding_key }}">{{ e.finding_key[:12] }}…</td>
         <td>{{ e.finding_rule }}</td>
+        <td><span class="badge {{ (e.finding_type or 'VULNERABILITY') | lower }}">{{ e.finding_type or 'VULN' }}</span></td>
         <td><span class="badge {{ e.severity | lower }}">{{ e.severity }}</span></td>
         <td><span class="badge {{ e.status }}">{{ e.status | replace('_', ' ') }}</span></td>
         <td title="{{ e.finding_file }}">{{ e.finding_file.split(':')[-1] if ':' in (e.finding_file or '') else e.finding_file }}</td>

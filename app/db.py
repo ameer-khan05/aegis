@@ -1,4 +1,4 @@
-"""SQLite audit log — stores scan results for dashboard and reporting."""
+"""SQLite audit log — stores scan results (vulnerabilities and bugs) for dashboard and reporting."""
 
 import json
 import logging
@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     finding_key TEXT NOT NULL,
     finding_rule TEXT NOT NULL,
     finding_file TEXT NOT NULL,
+    finding_type TEXT NOT NULL DEFAULT 'VULNERABILITY',
     severity TEXT NOT NULL,
     github_issue_url TEXT,
     devin_session_id TEXT,
@@ -45,7 +46,7 @@ async def insert_entry(entry: dict[str, object]) -> int:
     """Insert a new audit log entry. Returns the row id."""
     cols = [
         "timestamp", "scan_task_id", "finding_key", "finding_rule",
-        "finding_file", "severity", "github_issue_url", "devin_session_id",
+        "finding_file", "finding_type", "severity", "github_issue_url", "devin_session_id",
         "devin_session_url", "status", "pr_url", "tests_passed",
         "failure_reason", "acu_consumed", "duration_seconds",
     ]
@@ -80,6 +81,7 @@ async def get_entries(
     severity: str | None = None,
     status: str | None = None,
     scan_task_id: str | None = None,
+    finding_type: str | None = None,
 ) -> list[dict[str, object]]:
     """Query audit log with optional filters."""
     query = "SELECT * FROM audit_log WHERE 1=1"
@@ -94,6 +96,9 @@ async def get_entries(
     if scan_task_id:
         query += " AND scan_task_id = ?"
         params.append(scan_task_id)
+    if finding_type:
+        query += " AND finding_type = ?"
+        params.append(finding_type)
 
     query += " ORDER BY id DESC"
 

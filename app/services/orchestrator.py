@@ -51,6 +51,7 @@ async def _process_finding(scan_task_id: str, finding: Finding) -> None:
         "finding_key": finding.key,
         "finding_rule": finding.rule,
         "finding_file": finding.component,
+        "finding_type": finding.type,
         "severity": finding.severity,
         "status": "pending",
     }

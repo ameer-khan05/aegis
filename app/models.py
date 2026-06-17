@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class Finding(BaseModel):
-    """A security finding from SonarCloud."""
+    """A finding from SonarCloud (vulnerability or bug)."""
 
     key: str
     rule: str
@@ -33,6 +33,7 @@ class AuditEntry(BaseModel):
     finding_key: str
     finding_rule: str
     finding_file: str
+    finding_type: str = "VULNERABILITY"
     severity: str
     github_issue_url: str | None = None
     devin_session_id: str | None = None

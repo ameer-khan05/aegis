@@ -1,4 +1,4 @@
-"""GitHub API client — create issues for findings."""
+"""GitHub API client — create issues for findings (vulnerabilities and bugs)."""
 
 import logging
 
@@ -50,7 +50,9 @@ async def create_issue(finding: Finding) -> str | None:
                         return item["html_url"]
 
         # Create new issue
+        type_label = "security" if finding.type == "VULNERABILITY" else "bug"
         body = (
+            f"**Type:** {finding.type}\n"
             f"**Severity:** {finding.severity}\n"
             f"**Rule:** {finding.rule}\n"
             f"**File:** `{finding.component}`\n"
@@ -65,7 +67,7 @@ async def create_issue(finding: Finding) -> str | None:
             json={
                 "title": title,
                 "body": body,
-                "labels": ["aegis", "security", finding.severity.lower()],
+                "labels": ["aegis", type_label, finding.severity.lower()],
             },
         )
 

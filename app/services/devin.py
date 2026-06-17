@@ -1,4 +1,4 @@
-"""Devin API client — launch and poll remediation sessions."""
+"""Devin API client — launch and poll remediation sessions (vulnerabilities and bugs)."""
 
 import asyncio
 import logging
@@ -27,12 +27,22 @@ STRUCTURED_OUTPUT_SCHEMA = {
 }
 
 
-async def launch_session(finding: Finding) -> dict[str, str] | None:
-    """Launch a Devin session to fix a security finding.
-
-    Returns {"session_id": ..., "url": ...} or None on failure.
-    """
-    prompt = (
+def _build_prompt(finding: Finding) -> str:
+    """Build a type-appropriate prompt for the Devin session."""
+    if finding.type == "BUG":
+        return (
+            f"Fix the bug in {finding.component} at line {finding.line}.\n"
+            f"Rule: {finding.rule}\n"
+            f"Description: {finding.message}\n\n"
+            f"Steps:\n"
+            f"1. Read the flagged code and understand the bug\n"
+            f"2. Apply the fix following the rule guidance\n"
+            f"3. Run the test suite (pytest tests/)\n"
+            f"4. If tests pass, open a PR targeting the main branch\n"
+            f"5. Report structured output with finding_key='{finding.key}'\n\n"
+            f"Do NOT auto-merge. Stop after opening the PR."
+        )
+    return (
         f"Fix the security vulnerability in {finding.component} at line {finding.line}.\n"
         f"Rule: {finding.rule}\n"
         f"Description: {finding.message}\n\n"
@@ -45,10 +55,19 @@ async def launch_session(finding: Finding) -> dict[str, str] | None:
         f"Do NOT auto-merge. Stop after opening the PR."
     )
 
+
+async def launch_session(finding: Finding) -> dict[str, str] | None:
+    """Launch a Devin session to fix a finding (vulnerability or bug).
+
+    Returns {"session_id": ..., "url": ...} or None on failure.
+    """
+    prompt = _build_prompt(finding)
+    tag_prefix = "bug-fix" if finding.type == "BUG" else "security-fix"
+
     payload = {
         "prompt": prompt,
         "repos": [settings.GITHUB_REPO],
-        "tags": ["aegis", "security-fix", finding.rule],
+        "tags": ["aegis", tag_prefix, finding.rule],
         "max_acu_limit": settings.AEGIS_MAX_ACU,
         "title": f"Aegis: Fix {finding.rule} in {finding.component}",
         "create_as_user_id": settings.DEVIN_USER_ID,

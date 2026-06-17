@@ -1,6 +1,6 @@
-# Aegis — Event-Driven Security Remediation Orchestrator
+# Aegis — Event-Driven Remediation Orchestrator
 
-Aegis automates the remediation of security vulnerabilities found by SonarCloud in the [Apache Superset fork](https://github.com/ameer-khan05/superset-aegis-demo). When a scan completes, Aegis catches the webhook, fetches findings, creates GitHub issues, and dispatches [Devin AI](https://devin.ai) sessions to fix the code and open PRs — all driven programmatically via the Devin API.
+Aegis automates the remediation of security vulnerabilities **and bugs** found by SonarCloud in the [Apache Superset fork](https://github.com/ameer-khan05/superset-aegis-demo). When a scan completes, Aegis catches the webhook, fetches findings (both `VULNERABILITY` and `BUG` types), creates GitHub issues, and dispatches [Devin AI](https://devin.ai) sessions to fix the code and open PRs — all driven programmatically via the Devin API.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ Aegis automates the remediation of security vulnerabilities found by SonarCloud 
 │  SonarCloud  │ ──────────────▶│  Aegis (FastAPI)                       │
 │  Scan        │  HMAC-SHA256   │                                        │
 └──────────────┘                │  1. Validate webhook signature         │
-                                │  2. GET /api/issues/search (BLOCKER)   │
+                                │  2. GET /api/issues/search (VULN+BUG)  │
                                 │  3. POST GitHub Issues (with dedup)    │
                                 │  4. POST Devin v3 API (per finding)    │
                                 │  5. Poll sessions → structured output  │
@@ -17,7 +17,7 @@ Aegis automates the remediation of security vulnerabilities found by SonarCloud 
                                 │                                        │
                                 │  Dashboard: /dashboard                 │
                                 │  ├── KPI cards (found/resolved/failed) │
-                                │  ├── Filters (severity/status/scan)    │
+                                │  ├── Filters (type/severity/status/scan)│
                                 │  └── Audit table with PR links         │
                                 └────────────────────────────────────────┘
 ```
@@ -101,6 +101,7 @@ The simulation triggers the full orchestration pipeline. Without valid SonarClou
 | `DEVIN_ORG_ID` | Yes | — | Devin organization ID |
 | `DEVIN_USER_ID` | Yes | — | Devin user ID (for session attribution) |
 | `AEGIS_MIN_SEVERITY` | No | `BLOCKER` | Minimum severity to remediate |
+| `AEGIS_ISSUE_TYPES` | No | `VULNERABILITY,BUG` | Comma-separated SonarCloud issue types to fetch |
 | `AEGIS_MAX_ACU` | No | `15` | ACU cap per Devin session |
 | `AEGIS_POLL_INTERVAL` | No | `30` | Seconds between session polls |
 | `AEGIS_SESSION_TIMEOUT` | No | `1200` | Max seconds before timeout |
@@ -110,7 +111,7 @@ The simulation triggers the full orchestration pipeline. Without valid SonarClou
 The dashboard at `/dashboard` provides:
 
 - **KPI Cards** — Findings detected, sessions triggered, resolved, failed
-- **3 Filters** — By Severity (BLOCKER/CRITICAL), By Status (Fixed/Failed/In Progress/Timed Out), By Scan Run
+- **4 Filters** — By Type (Vulnerability/Bug), By Severity (BLOCKER/CRITICAL), By Status (Fixed/Failed/In Progress/Timed Out), By Scan Run
 - **Audit Table** — Each finding with links to the GitHub issue, Devin session, and PR
 - **Auto-refresh** — Updates every 30 seconds
 
@@ -118,7 +119,7 @@ The dashboard at `/dashboard` provides:
 
 1. **SonarCloud** completes a scan and fires a webhook to `/webhook/sonar`
 2. **Aegis** validates the HMAC-SHA256 signature and checks `status == "SUCCESS"`
-3. **Findings Fetcher** calls `GET /api/issues/search` filtered to `severities=BLOCKER`
+3. **Findings Fetcher** calls `GET /api/issues/search` for each configured type (`VULNERABILITY`, `BUG`) filtered to `severities=BLOCKER`
 4. **GitHub Issues** are created for each finding (with dedup to avoid duplicates on re-scans)
 5. **Devin Sessions** are launched via the v3 API with:
    - Repo pinned to the Superset fork
@@ -175,7 +176,8 @@ uvicorn app.main:app --reload --port 8000
 | **Devin v3 API** | Only version supporting `structured_output_schema`, `repos`, `tags`, ACU cap |
 | **1 session per finding** | Simpler tracking; batching is a future optimization |
 | **BLOCKER severity only** | Keeps demo to ~5-15 findings, ~75-225 ACU max |
-| **Configurable severity** | `AEGIS_MIN_SEVERITY` env var shows system scales without burning budget |
+| **VULNERABILITY + BUG types** | Demonstrates Devin API handling both security and code quality issues |
+| **Configurable severity & types** | `AEGIS_MIN_SEVERITY` + `AEGIS_ISSUE_TYPES` env vars show system scales without burning budget |
 | **SQLite** | Zero-config, demo-friendly; swappable for Postgres in production |
 | **Jinja2 dashboard** | Lightweight server-rendered; no frontend build step |
 | **No auto-merge** | PRs stop at "opened" — human reviews before merge |

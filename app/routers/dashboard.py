@@ -20,10 +20,13 @@ async def dashboard(
     severity: str | None = None,
     status: str | None = None,
     scan_run: str | None = None,
+    issue_type: str | None = None,
 ) -> HTMLResponse:
     """Render executive dashboard with KPI cards, filters, and audit table."""
     summary = await get_summary()
-    entries = await get_entries(severity=severity, status=status, scan_task_id=scan_run)
+    entries = await get_entries(
+        severity=severity, status=status, scan_task_id=scan_run, finding_type=issue_type,
+    )
     scan_runs = await get_scan_runs()
 
     return templates.TemplateResponse(
@@ -37,6 +40,7 @@ async def dashboard(
                 "severity": severity,
                 "status": status,
                 "scan_run": scan_run,
+                "issue_type": issue_type,
             },
         },
     )
@@ -47,9 +51,12 @@ async def results(
     severity: str | None = None,
     status: str | None = None,
     scan_run: str | None = None,
+    issue_type: str | None = None,
 ) -> dict[str, list[dict[str, object]]]:
     """Return audit log entries as JSON."""
-    entries = await get_entries(severity=severity, status=status, scan_task_id=scan_run)
+    entries = await get_entries(
+        severity=severity, status=status, scan_task_id=scan_run, finding_type=issue_type,
+    )
     return {"entries": entries}
 
 

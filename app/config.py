@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Aegis behaviour
     AEGIS_MIN_SEVERITY: str = "BLOCKER"
+    AEGIS_ISSUE_TYPES: str = "VULNERABILITY,BUG"
     AEGIS_MAX_ACU: int = 15
     AEGIS_POLL_INTERVAL: int = 30  # seconds
     AEGIS_SESSION_TIMEOUT: int = 1200  # 20 minutes
