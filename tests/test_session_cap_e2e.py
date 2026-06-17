@@ -102,12 +102,13 @@ class FakeAsyncClient:
         if "api.github.com/search/issues" in url:
             return FakeHTTPResponse({"items": []})
 
-        # Devin session poll — return immediate success
+        # Devin session poll — return immediate success with ACU cost
         if "/sessions/" in url and "api.devin.ai" in url:
             session_id = url.rsplit("/", 1)[-1]
             return FakeHTTPResponse({
                 "status": "exit",
                 "status_detail": "",
+                "acus_consumed": 3.5,
                 "structured_output": {
                     "finding_key": session_id,
                     "fixed": True,
@@ -325,6 +326,32 @@ def main():
             f"previously-skipped findings, launched {new_sessions_run3} sessions"
         )
 
+    # 12. ACU cost: fixed entries should have acu_consumed > 0, skipped should be 0
+    fixed_with_acu = [
+        e for e in entries1
+        if e.get("status") == "fixed" and (e.get("acu_consumed") or 0) > 0
+    ]
+    if len(fixed_with_acu) != session_cap:
+        errors.append(
+            f"FAIL: Expected {session_cap} fixed entries with acu_consumed > 0, "
+            f"got {len(fixed_with_acu)}"
+        )
+    skipped_with_acu = [
+        e for e in entries1
+        if e.get("status") == "skipped" and (e.get("acu_consumed") or 0) > 0
+    ]
+    if skipped_with_acu:
+        errors.append(
+            f"FAIL: Skipped entries should have acu_consumed=0, "
+            f"found {len(skipped_with_acu)} with cost"
+        )
+    total_acu = summary1.get("total_acu", 0)
+    expected_acu = session_cap * 3.5  # 3.5 ACU per mock session
+    if abs(float(total_acu) - expected_acu) > 0.01:
+        errors.append(
+            f"FAIL: Expected total_acu={expected_acu}, got {total_acu}"
+        )
+
     if errors:
         print("RESULTS:")
         for e in errors:
@@ -341,6 +368,7 @@ def main():
         print("  ✓ Idempotency: duplicate taskId rejected (0 new sessions)")
         print(f"  ✓ Dedup: fixed findings skipped, {new_sessions_run3} skipped findings retried")
         print("  ✓ problem_summary + fix_summary populated correctly")
+        print(f"  ✓ ACU cost: {len(fixed_with_acu)} fixed entries have cost, total={total_acu} ACU")
         sys.exit(0)
 
 

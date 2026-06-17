@@ -66,7 +66,7 @@ async def results(
 
 
 @router.get("/api/summary")
-async def summary() -> dict[str, int]:
+async def summary() -> dict[str, int | float]:
     """Return executive summary KPI numbers."""
     return await get_summary()
 
