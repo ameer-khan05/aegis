@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/ ./app/
+COPY tests/ ./tests/
+COPY simulate.py .
+
+RUN mkdir -p data
+
+EXPOSE 8000
+
+ENV UVICORN_HOST=0.0.0.0
+ENV UVICORN_PORT=8000
+
+CMD uvicorn app.main:app --host "$UVICORN_HOST" --port "$UVICORN_PORT"
