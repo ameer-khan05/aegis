@@ -11,7 +11,7 @@
     .subtitle { color: #94a3b8; margin-bottom: 2rem; font-size: 0.95rem; }
 
     /* KPI Cards */
-    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 0.75rem; }
     .kpi-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; text-align: center; }
     .kpi-card .value { font-size: 2.5rem; font-weight: 700; }
     .kpi-card .label { color: #94a3b8; font-size: 0.85rem; margin-top: 0.25rem; }
@@ -19,6 +19,10 @@
     .kpi-card.sessions .value { color: #3b82f6; }
     .kpi-card.resolved .value { color: #22c55e; }
     .kpi-card.failed .value { color: #ef4444; }
+    .kpi-card.skipped .value { color: #94a3b8; }
+
+    .cap-note { color: #64748b; font-size: 0.8rem; margin-bottom: 2rem; padding: 0.5rem 0.75rem; background: #1e293b; border-radius: 8px; border-left: 3px solid #3b82f6; }
+    .cap-note strong { color: #94a3b8; }
 
     /* Filters */
     .filters { display: flex; gap: 1rem; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap; }
@@ -43,6 +47,8 @@
     .badge.pending { background: #3f3f46; color: #d4d4d8; }
     .badge.timed_out { background: #78350f; color: #fde68a; }
     .badge.error { background: #7f1d1d; color: #fca5a5; }
+    .badge.skipped { background: #27272a; color: #71717a; }
+    .badge.cancelled { background: #78350f; color: #fde68a; }
 
     .badge.blocker { background: #7f1d1d; color: #fca5a5; }
     .badge.critical { background: #78350f; color: #fde68a; }
@@ -80,7 +86,7 @@
     </div>
     <div class="kpi-card sessions">
       <div class="value">{{ summary.sessions_triggered }}</div>
-      <div class="label">Sessions Triggered</div>
+      <div class="label">Remediated This Run</div>
     </div>
     <div class="kpi-card resolved">
       <div class="value">{{ summary.resolved }}</div>
@@ -90,6 +96,15 @@
       <div class="value">{{ summary.failed }}</div>
       <div class="label">Failed</div>
     </div>
+    <div class="kpi-card skipped">
+      <div class="value">{{ summary.skipped }}</div>
+      <div class="label">Skipped (Cap)</div>
+    </div>
+  </div>
+
+  <div class="cap-note">
+    <strong>Session cap:</strong> {{ max_sessions_per_run }} per run (MAX_SESSIONS_PER_RUN).
+    {{ summary.findings_detected }} detected, {{ summary.sessions_triggered }} remediated — {{ summary.skipped }} skipped intentionally.
   </div>
 
   <!-- Filters -->
@@ -118,6 +133,8 @@
         <option value="failed" {{ 'selected' if filters.status == 'failed' }}>Failed</option>
         <option value="in_progress" {{ 'selected' if filters.status == 'in_progress' }}>In Progress</option>
         <option value="timed_out" {{ 'selected' if filters.status == 'timed_out' }}>Timed Out</option>
+        <option value="skipped" {{ 'selected' if filters.status == 'skipped' }}>Skipped</option>
+        <option value="cancelled" {{ 'selected' if filters.status == 'cancelled' }}>Cancelled</option>
         <option value="pending" {{ 'selected' if filters.status == 'pending' }}>Pending</option>
       </select>
     </div>

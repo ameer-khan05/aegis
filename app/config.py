@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     AEGIS_MAX_ACU: int = 15
     AEGIS_POLL_INTERVAL: int = 30  # seconds
     AEGIS_SESSION_TIMEOUT: int = 1200  # 20 minutes
+    MAX_SESSIONS_PER_RUN: int = 5  # cap on Devin sessions launched per webhook run
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

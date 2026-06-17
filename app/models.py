@@ -13,6 +13,7 @@ class Finding(BaseModel):
     line: int | None = None
     message: str
     type: str = "VULNERABILITY"
+    creation_date: str = ""
 
 
 class SessionResult(BaseModel):
