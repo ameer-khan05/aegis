@@ -87,6 +87,8 @@ The simulation triggers the full orchestration pipeline. Without valid SonarClou
 | `/api/results` | GET | Audit log entries (JSON, filterable) |
 | `/api/summary` | GET | KPI numbers (JSON) |
 | `/docs` | GET | OpenAPI interactive documentation |
+| `/api/runs/{id}/cancel` | POST | Cancel all in-flight sessions for a scan run |
+| `/api/sessions/{id}/cancel` | POST | Cancel a single in-flight Devin session |
 
 ## Environment Variables
 
@@ -105,13 +107,15 @@ The simulation triggers the full orchestration pipeline. Without valid SonarClou
 | `AEGIS_MAX_ACU` | No | `15` | ACU cap per Devin session |
 | `AEGIS_POLL_INTERVAL` | No | `30` | Seconds between session polls |
 | `AEGIS_SESSION_TIMEOUT` | No | `1200` | Max seconds before timeout |
+| `MAX_SESSIONS_PER_RUN` | No | `5` | Max Devin sessions launched per webhook run |
 
 ## Dashboard
 
 The dashboard at `/dashboard` provides:
 
-- **KPI Cards** — Findings detected, sessions triggered, resolved, failed
-- **4 Filters** — By Type (Vulnerability/Bug), By Severity (BLOCKER/CRITICAL), By Status (Fixed/Failed/In Progress/Timed Out), By Scan Run
+- **KPI Cards** — Findings detected, remediated this run, resolved, failed, skipped (cap)
+- **4 Filters** — By Type (Vulnerability/Bug), By Severity (BLOCKER/CRITICAL), By Status (Fixed/Failed/In Progress/Timed Out/Skipped/Cancelled), By Scan Run
+- **Cap explainer** — Banner showing session-cap value and intentional skip count
 - **Audit Table** — Each finding with links to the GitHub issue, Devin session, and PR
 - **Auto-refresh** — Updates every 30 seconds
 
@@ -121,13 +125,14 @@ The dashboard at `/dashboard` provides:
 2. **Aegis** validates the HMAC-SHA256 signature and checks `status == "SUCCESS"`
 3. **Findings Fetcher** calls `GET /api/issues/search` for each configured type (`VULNERABILITY`, `BUG`) filtered to `severities=BLOCKER`
 4. **GitHub Issues** are created for each finding (with dedup to avoid duplicates on re-scans)
-5. **Devin Sessions** are launched via the v3 API with:
+5. **Session Cap** — findings are sorted by severity (most severe first), then recency (most recent first).  Only the top `MAX_SESSIONS_PER_RUN` (default 5) are dispatched; the rest are recorded as *skipped* so the dashboard shows the full picture
+6. **Devin Sessions** are launched via the v3 API with:
    - Repo pinned to the Superset fork
    - Structured output schema (finding_key, fixed, tests_passed, pr_url, failure_reason)
    - ACU cap of 15 per session
    - `create_as_user_id` for session attribution
-6. **Poller** checks each session every 30s until terminal state (exit/error/suspended/timeout)
-7. **Results** are recorded in SQLite and displayed on the dashboard
+7. **Poller** checks each session every 30s until terminal state (exit/error/suspended/timeout)
+8. **Results** are recorded in SQLite and displayed on the dashboard
 
 ## Project Structure
 
@@ -176,12 +181,28 @@ uvicorn app.main:app --reload --port 8000
 | **Devin v3 API** | Only version supporting `structured_output_schema`, `repos`, `tags`, ACU cap |
 | **1 session per finding** | Simpler tracking; batching is a future optimization |
 | **BLOCKER severity only** | Keeps demo to ~5-15 findings, ~75-225 ACU max |
+| **Session cap (MAX_SESSIONS_PER_RUN)** | Prevents runaway cost; all findings still recorded for reporting |
 | **VULNERABILITY + BUG types** | Demonstrates Devin API handling both security and code quality issues |
 | **Configurable severity & types** | `AEGIS_MIN_SEVERITY` + `AEGIS_ISSUE_TYPES` env vars show system scales without burning budget |
 | **SQLite** | Zero-config, demo-friendly; swappable for Postgres in production |
 | **Jinja2 dashboard** | Lightweight server-rendered; no frontend build step |
 | **No auto-merge** | PRs stop at "opened" — human reviews before merge |
 | **Hotspots skipped** | SonarCloud hotspots API is internal/unreliable; planned for v2 |
+
+## Stopping In-Flight Sessions
+
+To cancel all running Devin sessions for a specific scan run:
+
+```bash
+curl -X POST http://localhost:8000/api/runs/<scan_task_id>/cancel
+```
+
+This calls the Devin v3 cancel API for every `in_progress` session in that run and marks them as `cancelled` in the audit log.  Individual sessions can also be cancelled directly via the Devin API:
+
+```bash
+curl -X POST https://api.devin.ai/v3/organizations/$DEVIN_ORG_ID/sessions/$SESSION_ID/cancel \
+  -H "Authorization: Bearer $DEVIN_API_KEY"
+```
 
 ## Future Extensions
 

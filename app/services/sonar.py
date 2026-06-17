@@ -46,6 +46,7 @@ async def fetch_vulnerabilities() -> list[Finding]:
                             line=issue.get("line"),
                             message=issue["message"],
                             type=issue.get("type", issue_type),
+                            creation_date=issue.get("creationDate", ""),
                         )
                     )
 

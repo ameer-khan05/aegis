@@ -142,6 +142,23 @@ async def poll_session(session_id: str) -> SessionResult | None:
     return None
 
 
+async def cancel_session(session_id: str) -> bool:
+    """Send a stop request to an in-flight Devin session.
+
+    Returns True if the API accepted the cancellation.
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{DEVIN_API}/v3/organizations/{settings.DEVIN_ORG_ID}/sessions/{session_id}/cancel",
+            headers={"Authorization": f"Bearer {settings.DEVIN_API_KEY}"},
+        )
+        if resp.is_success:
+            logger.info("Cancelled session %s", session_id)
+            return True
+        logger.warning("Failed to cancel session %s: %s %s", session_id, resp.status_code, resp.text)
+        return False
+
+
 def _extract_result(data: dict[str, object], session_id: str) -> SessionResult:
     """Parse structured_output from session response, with fallback."""
     structured = data.get("structured_output")

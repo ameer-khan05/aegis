@@ -1,6 +1,5 @@
 """SQLite audit log — stores scan results (vulnerabilities and bugs) for dashboard and reporting."""
 
-import json
 import logging
 from pathlib import Path
 
@@ -128,11 +127,21 @@ async def get_summary() -> dict[str, int]:
         row = await cursor.fetchone()
         failed = row[0] if row else 0
 
+        cursor = await db.execute("SELECT COUNT(*) FROM audit_log WHERE status = 'skipped'")
+        row = await cursor.fetchone()
+        skipped = row[0] if row else 0
+
+        cursor = await db.execute("SELECT COUNT(*) FROM audit_log WHERE status = 'cancelled'")
+        row = await cursor.fetchone()
+        cancelled = row[0] if row else 0
+
     return {
         "findings_detected": total,
         "sessions_triggered": sessions,
         "resolved": resolved,
         "failed": failed,
+        "skipped": skipped,
+        "cancelled": cancelled,
     }
 
 
