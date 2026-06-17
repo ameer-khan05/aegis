@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.db import get_entries, get_scan_runs, get_summary
+from app.services.devin import cancel_session
 from app.services.orchestrator import cancel_run_sessions
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -79,3 +80,28 @@ async def cancel_run(scan_task_id: str) -> JSONResponse:
             content={"detail": "No in-flight sessions found for this run"},
         )
     return JSONResponse(content={"cancelled": results})
+
+
+@router.post("/api/sessions/{session_id}/cancel")
+async def cancel_single_session(session_id: str) -> JSONResponse:
+    """Cancel a single in-flight Devin session."""
+    from app.db import update_entry, get_entries
+
+    ok = await cancel_session(session_id)
+    if not ok:
+        return JSONResponse(
+            status_code=502,
+            content={"detail": f"Failed to cancel session {session_id}"},
+        )
+
+    # Update audit log entry for this session
+    entries = await get_entries(status="in_progress")
+    for entry in entries:
+        if entry.get("devin_session_id") == session_id:
+            await update_entry(
+                str(entry["finding_key"]), str(entry["scan_task_id"]),
+                {"status": "cancelled", "failure_reason": "Manually cancelled"},
+            )
+            break
+
+    return JSONResponse(content={"session_id": session_id, "status": "cancelled"})

@@ -88,6 +88,7 @@ The simulation triggers the full orchestration pipeline. Without valid SonarClou
 | `/api/summary` | GET | KPI numbers (JSON) |
 | `/docs` | GET | OpenAPI interactive documentation |
 | `/api/runs/{id}/cancel` | POST | Cancel all in-flight sessions for a scan run |
+| `/api/sessions/{id}/cancel` | POST | Cancel a single in-flight Devin session |
 
 ## Environment Variables
 
