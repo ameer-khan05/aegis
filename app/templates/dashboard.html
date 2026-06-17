@@ -36,8 +36,10 @@
     /* Audit Table */
     .audit-table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 12px; overflow: hidden; }
     .audit-table th { background: #334155; padding: 0.75rem 1rem; text-align: left; font-size: 0.8rem; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.05em; }
-    .audit-table td { padding: 0.75rem 1rem; border-top: 1px solid #1e293b; font-size: 0.9rem; }
+    .audit-table td { padding: 0.75rem 1rem; border-top: 1px solid #1e293b; font-size: 0.9rem; vertical-align: top; }
     .audit-table tr:hover { background: #263548; }
+    .col-summary { max-width: 280px; font-size: 0.82rem; line-height: 1.4; color: #cbd5e1; }
+    .col-summary.empty { color: #475569; font-style: italic; }
 
     /* Status badges */
     .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
@@ -167,6 +169,8 @@
         <th>Type</th>
         <th>Severity</th>
         <th>Status</th>
+        <th>Problem</th>
+        <th>Fix</th>
         <th>File</th>
         <th>Issue</th>
         <th>PR</th>
@@ -182,6 +186,8 @@
         <td><span class="badge {{ (e.finding_type or 'VULNERABILITY') | lower }}">{{ e.finding_type or 'VULN' }}</span></td>
         <td><span class="badge {{ e.severity | lower }}">{{ e.severity }}</span></td>
         <td><span class="badge {{ e.status }}">{{ e.status | replace('_', ' ') }}</span></td>
+        <td class="col-summary{% if not e.problem_summary %} empty{% endif %}">{{ e.problem_summary or '—' }}</td>
+        <td class="col-summary{% if not e.fix_summary %} empty{% endif %}">{{ e.fix_summary or ('Skipped — cap reached' if e.status == 'skipped' else '—') }}</td>
         <td title="{{ e.finding_file }}">{{ e.finding_file.split(':')[-1] if ':' in (e.finding_file or '') else e.finding_file }}</td>
         <td>{% if e.github_issue_url %}<a href="{{ e.github_issue_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
         <td>{% if e.pr_url %}<a href="{{ e.pr_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>

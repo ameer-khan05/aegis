@@ -24,6 +24,7 @@ class SessionResult(BaseModel):
     tests_passed: bool
     pr_url: str | None = None
     failure_reason: str | None = None
+    fix_summary: str | None = None
 
 
 class AuditEntry(BaseModel):
@@ -45,3 +46,5 @@ class AuditEntry(BaseModel):
     failure_reason: str | None = None
     acu_consumed: float = 0.0
     duration_seconds: int | None = None
+    problem_summary: str | None = None
+    fix_summary: str | None = None

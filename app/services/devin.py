@@ -21,14 +21,22 @@ STRUCTURED_OUTPUT_SCHEMA = {
         "tests_passed": {"type": "boolean"},
         "pr_url": {"type": ["string", "null"]},
         "failure_reason": {"type": ["string", "null"]},
+        "fix_summary": {"type": ["string", "null"]},
     },
-    "required": ["finding_key", "fixed", "tests_passed", "pr_url", "failure_reason"],
+    "required": ["finding_key", "fixed", "tests_passed", "pr_url", "failure_reason", "fix_summary"],
     "additionalProperties": False,
 }
 
 
 def _build_prompt(finding: Finding) -> str:
     """Build a type-appropriate prompt for the Devin session."""
+    fix_summary_instruction = (
+        "In your structured output, include a 'fix_summary' field: "
+        "a plain-English sentence (1-2 lines) explaining what you changed and why, "
+        "suitable for a VP of Engineering reading a dashboard. "
+        "Example: 'Replaced raw SQL string concatenation with parameterized queries "
+        "to prevent SQL injection in the user search endpoint.'"
+    )
     if finding.type == "BUG":
         return (
             f"Fix the bug in {finding.component} at line {finding.line}.\n"
@@ -40,6 +48,7 @@ def _build_prompt(finding: Finding) -> str:
             f"3. Run the test suite (pytest tests/)\n"
             f"4. If tests pass, open a PR targeting the main branch\n"
             f"5. Report structured output with finding_key='{finding.key}'\n\n"
+            f"{fix_summary_instruction}\n\n"
             f"Do NOT auto-merge. Stop after opening the PR."
         )
     return (
@@ -52,6 +61,7 @@ def _build_prompt(finding: Finding) -> str:
         f"3. Run the test suite (pytest tests/)\n"
         f"4. If tests pass, open a PR targeting the main branch\n"
         f"5. Report structured output with finding_key='{finding.key}'\n\n"
+        f"{fix_summary_instruction}\n\n"
         f"Do NOT auto-merge. Stop after opening the PR."
     )
 
@@ -169,6 +179,7 @@ def _extract_result(data: dict[str, object], session_id: str) -> SessionResult:
             tests_passed=bool(structured.get("tests_passed", False)),
             pr_url=structured.get("pr_url"),  # type: ignore[arg-type]
             failure_reason=structured.get("failure_reason"),  # type: ignore[arg-type]
+            fix_summary=structured.get("fix_summary"),  # type: ignore[arg-type]
         )
 
     status = str(data.get("status", "error"))
