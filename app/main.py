@@ -1,8 +1,12 @@
 """Aegis — Event-driven security remediation orchestrator."""
 
+import logging
+
 from fastapi import FastAPI
 
 from app.routers import dashboard, webhook
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
 
 app = FastAPI(
     title="Aegis",
