@@ -74,6 +74,9 @@ async def jira_webhook(
 ) -> Response:
     """Receive Jira automation webhook when a ticket transitions To Do → In Progress.
 
+    Authentication: If JIRA_WEBHOOK_SECRET is set, the request must include
+    an ``X-Aegis-Secret`` header with the matching value.
+
     Expected payload shape (configured in Jira Automation):
     {
       "issue": {
@@ -89,6 +92,13 @@ async def jira_webhook(
       }
     }
     """
+    # Validate shared secret if configured
+    if settings.JIRA_WEBHOOK_SECRET:
+        provided = request.headers.get("X-Aegis-Secret", "")
+        if provided != settings.JIRA_WEBHOOK_SECRET:
+            logger.warning("Jira webhook rejected: invalid or missing X-Aegis-Secret header")
+            return Response(status_code=401, content="invalid secret")
+
     payload = await request.json()
 
     issue = payload.get("issue")
@@ -166,8 +176,8 @@ async def jira_webhook(
 
     scan_task_id = str(matching_entry["scan_task_id"])
 
-    # Update status to in_progress before dispatching
-    await update_entry(finding_key, scan_task_id, {"status": "pending"})
+    # Mark as in_progress before dispatching to prevent duplicate launches
+    await update_entry(finding_key, scan_task_id, {"status": "in_progress"})
 
     background_tasks.add_task(_process_jira_finding, finding, ticket_key, scan_task_id)
     logger.info("Dispatched Jira-triggered remediation for %s (ticket %s)", finding_key, ticket_key)

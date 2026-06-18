@@ -36,11 +36,26 @@ CREATE TABLE IF NOT EXISTS audit_log (
 """
 
 
+_MIGRATIONS: list[str] = [
+    "ALTER TABLE audit_log ADD COLUMN jira_ticket_key TEXT",
+    "ALTER TABLE audit_log ADD COLUMN jira_ticket_url TEXT",
+]
+
+
 async def init_db() -> None:
-    """Create the database and table if they don't exist."""
+    """Create the database and table if they don't exist.
+
+    Also runs lightweight migrations (ALTER TABLE ADD COLUMN) so that
+    existing databases pick up new columns without manual intervention.
+    """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(CREATE_TABLE)
+        for ddl in _MIGRATIONS:
+            try:
+                await db.execute(ddl)
+            except Exception:  # noqa: BLE001 — column already exists
+                pass
         await db.commit()
     logger.info("Database initialized at %s", DB_PATH)
 

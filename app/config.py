@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     JIRA_EMAIL: str = ""
     JIRA_API_TOKEN: str = ""
     JIRA_PROJECT_KEY: str = "KAN"
+    JIRA_WEBHOOK_SECRET: str = ""
 
     # Aegis behaviour
     AEGIS_MIN_SEVERITY: str = "BLOCKER"
