@@ -37,32 +37,25 @@ def _build_prompt(finding: Finding) -> str:
         "Example: 'Replaced raw SQL string concatenation with parameterized queries "
         "to prevent SQL injection in the user search endpoint.'"
     )
-    if finding.type == "BUG":
-        return (
-            f"Fix the bug in {finding.component} at line {finding.line}.\n"
-            f"Rule: {finding.rule}\n"
-            f"Description: {finding.message}\n\n"
-            f"Steps:\n"
-            f"1. Read the flagged code and understand the bug\n"
-            f"2. Apply the fix following the rule guidance\n"
-            f"3. Run the test suite (pytest tests/)\n"
-            f"4. If tests pass, open a PR targeting the main branch\n"
-            f"5. Report structured output with finding_key='{finding.key}'\n\n"
-            f"{fix_summary_instruction}\n\n"
-            f"Do NOT auto-merge. Stop after opening the PR."
-        )
+    issue_type = "bug" if finding.type == "BUG" else "security vulnerability"
     return (
-        f"Fix the security vulnerability in {finding.component} at line {finding.line}.\n"
+        f"Fix the {issue_type} in {finding.component} at line {finding.line}.\n"
         f"Rule: {finding.rule}\n"
         f"Description: {finding.message}\n\n"
         f"Steps:\n"
-        f"1. Read the flagged code\n"
+        f"1. Read the flagged code and understand the issue\n"
         f"2. Apply the fix following the rule guidance\n"
-        f"3. Run the test suite (pytest tests/)\n"
+        f"3. Run the test suite locally (pytest tests/)\n"
         f"4. If tests pass, open a PR targeting the main branch\n"
-        f"5. Report structured output with finding_key='{finding.key}'\n\n"
+        f"5. IMMEDIATELY after opening the PR, report your structured output "
+        f"with finding_key='{finding.key}' and END the session.\n\n"
+        f"CRITICAL: Do NOT wait for CI checks to finish after opening the PR. "
+        f"Do NOT monitor or poll CI status. As soon as the PR is created and "
+        f"you have confirmed local tests pass, report structured output "
+        f"(fixed=true, pr_url=<the PR URL>) and stop. The session must reach "
+        f"a terminal state immediately after PR creation.\n\n"
         f"{fix_summary_instruction}\n\n"
-        f"Do NOT auto-merge. Stop after opening the PR."
+        f"Do NOT auto-merge."
     )
 
 
