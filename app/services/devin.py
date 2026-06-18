@@ -169,6 +169,20 @@ async def poll_session(session_id: str) -> SessionResult | None:
                 logger.info("Session %s finished (status=running, detail=finished)", session_id)
                 return _extract_result(data, session_id)
 
+            # Terminal: session completed work and is waiting for user input.
+            # The v3 API returns status=running, detail=waiting_for_user when
+            # the session has produced structured_output or opened a PR.
+            if status == "running" and detail == "waiting_for_user":
+                has_output = isinstance(data.get("structured_output"), dict)
+                has_pr = bool(_extract_pr_url_from_response(data))
+                if has_output or has_pr:
+                    logger.info(
+                        "Session %s waiting_for_user with %s — treating as terminal",
+                        session_id,
+                        "structured_output" if has_output else "PR in pull_requests[]",
+                    )
+                    return _extract_result(data, session_id)
+
             # Terminal: suspended for a non-recoverable reason
             if status == "suspended" and detail in terminal_suspended_details:
                 logger.warning("Session %s suspended: %s", session_id, detail)
