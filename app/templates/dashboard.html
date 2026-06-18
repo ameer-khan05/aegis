@@ -201,7 +201,7 @@
         <td>{% if e.jira_ticket_key %}<a href="{{ e.jira_ticket_url }}" target="_blank">{{ e.jira_ticket_key }}</a>{% else %}—{% endif %}</td>
         <td>{% if e.github_issue_url %}<a href="{{ e.github_issue_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
         <td>{% if e.pr_url %}<a href="{{ e.pr_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
-        <td>{% if e.acu_consumed %}{{ '%.2f' % e.acu_consumed }}{% else %}—{% endif %}</td>
+        <td>{% if e.acu_consumed is not none and e.acu_consumed > 0 %}{{ '%.2f' % e.acu_consumed }}{% elif e.status in ('fixed', 'failed', 'timed_out', 'error') %}0.00{% else %}—{% endif %}</td>
         <td>{% if e.devin_session_url %}<a href="{{ e.devin_session_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
         <td>
           {% if e.status == 'in_progress' and e.devin_session_id %}

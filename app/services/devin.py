@@ -245,7 +245,7 @@ def _extract_result(data: dict[str, object], session_id: str) -> SessionResult:
     detail = str(data.get("status_detail", ""))
 
     # Session opened a PR but didn't produce structured output
-    if pr_url and status in ("exit", "running") and detail in ("", "finished"):
+    if pr_url and status in ("exit", "running") and detail in ("", "finished", "waiting_for_user"):
         logger.info(
             "Session %s has no structured_output but opened PR %s — marking fixed",
             session_id, pr_url,
