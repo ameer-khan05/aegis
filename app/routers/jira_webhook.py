@@ -8,7 +8,7 @@ from app.config import settings
 from app.db import get_entries, init_db, update_entry
 from app.models import Finding
 from app.services.devin import launch_session, poll_session
-from app.services.jira import transition_ticket
+from app.services.jira import add_comment, transition_ticket
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,12 @@ async def _process_jira_finding(finding: Finding, ticket_key: str, scan_task_id:
         "acu_consumed": result.acu_consumed,
     })
 
-    # Transition Jira ticket to Done if fix was successful
+    # Comment + transition Jira ticket to Done if fix was successful
     if result.fixed and result.pr_url:
+        await add_comment(
+            ticket_key,
+            f"Remediated autonomously by Devin. PR: {result.pr_url} (awaiting human review).",
+        )
         await transition_ticket(ticket_key, "Done")
 
     logger.info(
