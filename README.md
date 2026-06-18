@@ -1,213 +1,273 @@
-# Aegis — Event-Driven Remediation Orchestrator
+# Aegis
 
-Aegis automates the remediation of security vulnerabilities **and bugs** found by SonarCloud in the [Apache Superset fork](https://github.com/ameer-khan05/superset-aegis-demo). When a scan completes, Aegis catches the webhook, fetches findings (both `VULNERABILITY` and `BUG` types), creates GitHub issues, and dispatches [Devin AI](https://devin.ai) sessions to fix the code and open PRs — all driven programmatically via the Devin API.
+Event-driven orchestrator that uses the [Devin API](https://docs.devin.ai) as a programmable primitive to autonomously remediate security vulnerabilities and code-quality bugs in a fork of [Apache Superset](https://github.com/ameer-khan05/superset-aegis-demo). SonarCloud detects the findings; Aegis creates a Jira ticket and GitHub issue per finding; moving a Jira ticket from *To Do* to *In Progress* triggers a Devin session that reads the flagged code, applies the fix, runs tests, and opens a pull request; Aegis polls the session and auto-transitions the ticket to *Done* when the PR is open. A live dashboard and SQLite audit log provide full observability. The system was built to clear a security backlog no human team could hand-remediate at scale.
+
+> Built as part of a Devin evaluation.
 
 ## Architecture
 
 ```
-┌──────────────┐    webhook     ┌────────────────────────────────────────┐
-│  SonarCloud  │ ──────────────▶│  Aegis (FastAPI)                       │
-│  Scan        │  HMAC-SHA256   │                                        │
-└──────────────┘                │  1. Validate webhook signature         │
-                                │  2. GET /api/issues/search (VULN+BUG)  │
-                                │  3. POST GitHub Issues (with dedup)    │
-                                │  4. POST Devin v3 API (per finding)    │
-                                │  5. Poll sessions → structured output  │
-                                │  6. Record results → SQLite audit log  │
-                                │                                        │
-                                │  Dashboard: /dashboard                 │
-                                │  ├── KPI cards (found/resolved/failed) │
-                                │  ├── Filters (type/severity/status/scan)│
-                                │  └── Audit table with PR links         │
-                                └────────────────────────────────────────┘
+                             ┌───────────────────────────────────────────────────────┐
+                             │  SonarCloud                                           │
+                             │  Scans on its own cadence; findings persist as backlog│
+                             └──────────────────────────┬────────────────────────────┘
+                                                        │
+                              (backlog already exists)   │ Aegis fetches via API
+                                                        │
+  PR merged to master                                   ▼
+        │              ┌────────────────────────────────────────────────────────────┐
+        ▼              │  Aegis Orchestrator (FastAPI)                              │
+  ┌──────────┐  POST   │                                                            │
+  │  GitHub   │────────▶│  /webhook/sonar                                            │
+  │  Action   │ (HMAC)  │    ├─ Validate HMAC signature                              │
+  │  (no scan)│         │    ├─ Fetch findings from SonarCloud API                   │
+  └──────────┘         │    ├─ Deduplicate against audit log                        │
+                        │    ├─ Create Jira ticket (To Do) + GitHub issue per finding│
+                        │    └─ Record as 'pending' in SQLite                        │
+                        │                                                            │
+                        │  /webhook/jira                                             │
+  ┌──────────┐  POST   │    ├─ Ticket moved To Do → In Progress                     │
+  │  Jira     │────────▶│    ├─ Enforce session cap (MAX_SESSIONS_PER_RUN)           │
+  │  Automation│        │    ├─ Launch Devin session (v3 API)                        │
+  └──────────┘         │    ├─ Poll until terminal state                            │
+                        │    ├─ Transition ticket to Done on success                 │
+                        │    └─ Record result + ACU cost in audit log                │
+                        │                                                            │
+                        │  /dashboard                                                │
+                        │    └─ KPI cards, filters, audit table, auto-refresh        │
+                        └────────────────────────────────────────────────────────────┘
 ```
 
-## Related Repository
+### Key design decisions
 
-| Repo | Purpose |
-|------|---------|
-| [ameer-khan05/superset-aegis-demo](https://github.com/ameer-khan05/superset-aegis-demo) | Superset fork — target of remediation (contains issues + Devin-opened PRs) |
+| Decision | Why |
+|----------|-----|
+| **Devin driven as an API primitive** | Not native Automations. The orchestrator controls session lifecycle, prompt, structured output schema, and polling — full programmatic control. |
+| **Scan decoupled from trigger** | The GitHub Action that fires on merge does *not* run a SonarCloud scan. It only POSTs the Aegis webhook. A slow full scan never blocks remediation. |
+| **Session cap (`MAX_SESSIONS_PER_RUN`)** | Prevents runaway cost and Devin session sprawl. Excess tickets wait in Jira for manual triage. |
+| **No auto-merge** | PRs wait for human review. The system intentionally stops at "PR opened." |
+| **Structured-output contract** | Each Devin session returns `{finding_key, fixed, tests_passed, pr_url, fix_summary}` — the dashboard is populated from machine-readable results, not scraped logs. |
+| **SQLite audit log** | Zero-config, demo-friendly. Swappable for Postgres in production. |
+
+## Tech Stack
+
+Python 3.12 / FastAPI, SQLite (via aiosqlite), httpx (async HTTP), asyncio polling, Jinja2 dashboard, Pydantic v2 settings, Docker Compose.
 
 ## Prerequisites
 
-- Docker & Docker Compose
-- ngrok (for webhook exposure during demo)
-- API keys (see [Environment Variables](#environment-variables))
-
-## Quick Start
-
-```bash
-# 1. Clone
-git clone https://github.com/ameer-khan05/aegis.git
-cd aegis
-
-# 2. Copy and fill in your secrets
-cp .env.example .env
-# Edit .env with your actual tokens
-
-# 3. Run
-docker-compose up --build
-
-# 4. Expose via ngrok (separate terminal)
-ngrok http 8000
-
-# 5. Configure the ngrok URL as a webhook in SonarCloud:
-#    SonarCloud → Project → Administration → Webhooks → Create
-#    URL: https://xxxx.ngrok-free.app/webhook/sonar
-#    Secret: same value as SONAR_WEBHOOK_SECRET in your .env
-
-# 6. Open the dashboard
-#    http://localhost:8000/dashboard
-```
-
-## Simulate (without live SonarCloud)
-
-For reviewers who want to see the flow without a live SonarCloud scan:
-
-```bash
-# Option 1: Python script (computes correct HMAC from your .env)
-python simulate.py
-
-# Option 2: Manual curl (replace HMAC with your computed value)
-curl -X POST http://localhost:8000/webhook/sonar \
-  -H "Content-Type: application/json" \
-  -H "X-Sonar-Webhook-HMAC-SHA256: <your_hmac_hex>" \
-  -d @tests/fixtures/sample_webhook.json
-```
-
-The simulation triggers the full orchestration pipeline. Without valid SonarCloud/Devin/GitHub tokens, API calls will fail gracefully and the dashboard will show the error states.
-
-## Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Healthcheck |
-| `/webhook/sonar` | POST | SonarCloud webhook receiver (HMAC validated) |
-| `/dashboard` | GET | Executive summary dashboard (HTML) |
-| `/api/results` | GET | Audit log entries (JSON, filterable) |
-| `/api/summary` | GET | KPI numbers (JSON) |
-| `/docs` | GET | OpenAPI interactive documentation |
-| `/api/runs/{id}/cancel` | POST | Cancel all in-flight sessions for a scan run |
-| `/api/sessions/{id}/cancel` | POST | Cancel a single in-flight Devin session |
+- **Docker** and Docker Compose
+- **SonarCloud** project with an API token ([sonarcloud.io](https://sonarcloud.io))
+- **Jira Cloud** project (free tier works) with an API token ([id.atlassian.net/manage-profile/security/api-tokens](https://id.atlassian.net/manage-profile/security/api-tokens))
+- **Devin** organization with a service user (Admin role) and an API key ([docs.devin.ai](https://docs.devin.ai))
+- **GitHub** fine-grained PAT scoped to the fork (Issues: read/write)
+- **ngrok** (or any public tunnel) to receive webhooks locally
 
 ## Environment Variables
 
+Copy `.env.example` to `.env` and fill in. Secrets are `.gitignore`d.
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SONAR_TOKEN` | Yes | — | SonarCloud API token |
-| `SONAR_WEBHOOK_SECRET` | Yes | — | HMAC-SHA256 secret for webhook validation |
+| `SONAR_TOKEN` | Yes | — | SonarCloud API token for fetching findings |
+| `SONAR_WEBHOOK_SECRET` | Yes | — | Shared HMAC-SHA256 key for webhook signature validation |
 | `SONAR_PROJECT_KEY` | No | `ameer-khan05_superset-aegis-demo` | SonarCloud project key |
-| `GITHUB_TOKEN` | Yes | — | GitHub PAT for issue creation |
-| `GITHUB_REPO` | No | `ameer-khan05/superset-aegis-demo` | Target repo for issues |
-| `DEVIN_API_KEY` | Yes | — | Devin service user API key |
-| `DEVIN_ORG_ID` | Yes | — | Devin organization ID |
-| `DEVIN_USER_ID` | Yes | — | Devin user ID (for session attribution) |
-| `AEGIS_MIN_SEVERITY` | No | `BLOCKER` | Minimum severity to remediate |
+| `GITHUB_TOKEN` | Yes | — | GitHub PAT for creating issues on the fork |
+| `GITHUB_REPO` | No | `ameer-khan05/superset-aegis-demo` | Target repo (`owner/repo`) |
+| `DEVIN_API_KEY` | Yes | — | Devin service-user API key |
+| `DEVIN_ORG_ID` | Yes | — | Devin organization ID (prefix: `org-`) |
+| `DEVIN_USER_ID` | Yes | — | Devin user ID for session attribution (prefix: `user-`) |
+| `JIRA_BASE_URL` | No | — | Jira Cloud instance URL (e.g. `https://yoursite.atlassian.net`). Leave blank to disable Jira. |
+| `JIRA_EMAIL` | No | — | Atlassian account email for Basic auth |
+| `JIRA_API_TOKEN` | No | — | Jira API token |
+| `JIRA_PROJECT_KEY` | No | `KAN` | Jira project key for ticket creation |
+| `JIRA_WEBHOOK_SECRET` | No | — | Shared secret for `/webhook/jira` authentication (`X-Aegis-Secret` header) |
+| `AEGIS_MIN_SEVERITY` | No | `BLOCKER` | Minimum severity threshold — expands upward (e.g. `MAJOR` fetches BLOCKER + CRITICAL + MAJOR) |
 | `AEGIS_ISSUE_TYPES` | No | `VULNERABILITY,BUG` | Comma-separated SonarCloud issue types to fetch |
-| `AEGIS_MAX_ACU` | No | `15` | ACU cap per Devin session |
-| `AEGIS_POLL_INTERVAL` | No | `30` | Seconds between session polls |
-| `AEGIS_SESSION_TIMEOUT` | No | `1200` | Max seconds before timeout |
-| `MAX_SESSIONS_PER_RUN` | No | `5` | Max Devin sessions launched per webhook run |
+| `MAX_FINDINGS_PER_RUN` | No | `10` | Cap on findings fetched from SonarCloud per run |
+| `MAX_SESSIONS_PER_RUN` | No | `5` | Concurrent Devin session cap (enforced on `/webhook/jira`) |
+| `AEGIS_MAX_ACU` | No | `15` | ACU budget cap per Devin session |
+| `AEGIS_POLL_INTERVAL` | No | `30` | Seconds between session status polls |
+| `AEGIS_SESSION_TIMEOUT` | No | `2700` | Max seconds to poll a session before marking timed out (45 min) |
 
-## Dashboard
+## Setup & Run
 
-The dashboard at `/dashboard` provides:
+```bash
+git clone https://github.com/ameer-khan05/aegis.git
+cd aegis
 
-- **KPI Cards** — Findings detected, remediated this run, resolved, failed, skipped (cap)
-- **4 Filters** — By Type (Vulnerability/Bug), By Severity (BLOCKER/CRITICAL), By Status (Fixed/Failed/In Progress/Timed Out/Skipped/Cancelled), By Scan Run
-- **Cap explainer** — Banner showing session-cap value and intentional skip count
-- **Audit Table** — Each finding with links to the GitHub issue, Devin session, and PR
-- **Auto-refresh** — Updates every 30 seconds
+cp .env.example .env
+# Fill in all required values
 
-## How It Works
+docker compose up --build
+```
 
-1. **SonarCloud** completes a scan and fires a webhook to `/webhook/sonar`
-2. **Aegis** validates the HMAC-SHA256 signature and checks `status == "SUCCESS"`
-3. **Findings Fetcher** calls `GET /api/issues/search` for each configured type (`VULNERABILITY`, `BUG`) filtered to `severities=BLOCKER`
-4. **GitHub Issues** are created for each finding (with dedup to avoid duplicates on re-scans)
-5. **Session Cap** — findings are sorted by severity (most severe first), then recency (most recent first).  Only the top `MAX_SESSIONS_PER_RUN` (default 5) are dispatched; the rest are recorded as *skipped* so the dashboard shows the full picture
-6. **Devin Sessions** are launched via the v3 API with:
-   - Repo pinned to the Superset fork
-   - Structured output schema (finding_key, fixed, tests_passed, pr_url, failure_reason)
-   - ACU cap of 15 per session
-   - `create_as_user_id` for session attribution
-7. **Poller** checks each session every 30s until terminal state (exit/error/suspended/timeout)
-8. **Results** are recorded in SQLite and displayed on the dashboard
+Confirm the dashboard is live at [http://localhost:8000/dashboard](http://localhost:8000/dashboard).
+
+To receive webhooks, expose the server via ngrok:
+
+```bash
+ngrok http 8000
+# Note the https://*.ngrok-free.app URL
+```
+
+## Populating Findings
+
+SonarCloud holds the findings backlog. The trigger workflow intentionally does **not** run a scan — it only fires the Aegis webhook. To populate or refresh the backlog, run a one-time full scan:
+
+1. Go to [Actions → SonarCloud Full Scan](https://github.com/ameer-khan05/superset-aegis-demo/actions/workflows/sonar-full-scan.yml)
+2. Click **"Run workflow"** → **"Run workflow"**
+
+This scans the entire codebase (~1.2M lines, takes ~20 min) and uploads findings to SonarCloud. It does **not** trigger Aegis — by design, backlog population is separate from remediation.
+
+## Triggering Remediation
+
+Three paths, depending on your scenario:
+
+### a) Live trigger (merge to master)
+
+Merge a PR to `master` on the fork. The `aegis-trigger.yml` GitHub Action fires automatically:
+
+```
+PR merged → aegis-trigger.yml runs → POSTs /webhook/sonar → Aegis fetches findings → creates Jira tickets
+```
+
+No scan runs in this path. Aegis reads the existing SonarCloud backlog.
+
+### b) Jira trigger (move ticket To Do → In Progress)
+
+Each finding has a Jira ticket in *To Do*. Move one (or several) to *In Progress* — the Jira Automation rule fires the `/webhook/jira` endpoint, which launches a Devin session for that specific finding.
+
+```
+Ticket → In Progress → /webhook/jira → Devin session → fix + PR → ticket → Done
+```
+
+The session cap (`MAX_SESSIONS_PER_RUN`) prevents runaway if multiple tickets move at once — excess requests get HTTP 429.
+
+### c) Simulate (no live scan needed)
+
+For reviewers who want to exercise the full pipeline without the external dependencies:
+
+```bash
+# Start the server
+docker compose up --build
+
+# In another terminal — replay a canned webhook
+python simulate.py
+# or specify a custom URL:
+python simulate.py http://localhost:8000
+```
+
+`simulate.py` reads `tests/fixtures/sample_webhook.json`, computes the correct HMAC from your `.env`, and POSTs it. Without valid SonarCloud/Devin/Jira tokens the API calls will fail gracefully — the dashboard will show error states, demonstrating the observability layer.
+
+## Jira Automation Setup
+
+Create an automation rule in your Jira project (Project Settings → Automation → Create rule):
+
+1. **Trigger:** *When: Status changes* — From status `To Do`, To status `In Progress`
+2. **Action:** *Send web request*
+   - **URL:** `https://<your-ngrok-url>/webhook/jira`
+   - **Method:** `POST`
+   - **Headers:**
+     ```
+     Content-Type: application/json
+     X-Aegis-Secret: <JIRA_WEBHOOK_SECRET from .env>
+     ```
+   - **Body:**
+     ```json
+     {
+       "issue": {
+         "key": "{{issue.key}}",
+         "fields": {
+           "summary": "{{issue.summary}}",
+           "status": { "name": "{{issue.status.name}}" }
+         }
+       },
+       "transition": {
+         "from_status": "To Do",
+         "to_status": "In Progress"
+       }
+     }
+     ```
+
+## Observability
+
+### Dashboard (`/dashboard`)
+
+| KPI Card | What it shows |
+|----------|---------------|
+| Findings Detected | Total findings fetched across all runs |
+| Awaiting (Jira To Do) | Findings with tickets created, waiting for triage |
+| In Progress | Active Devin sessions currently running |
+| Resolved | Sessions that opened a PR successfully |
+| Failed | Sessions that errored or couldn't fix the finding |
+| Total ACU Cost | Aggregate Devin compute spend across all sessions |
+
+The audit table shows every finding with its severity, rule, file, problem summary, fix summary, Jira ticket link, GitHub issue link, Devin session link, PR link, ACU cost, and status. Filters by type, severity, status, and scan run. Auto-refreshes every 30 seconds.
+
+### How would an engineering leader know it's working?
+
+- **Jira board** reflects the real pipeline state — *To Do* = backlog, *In Progress* = Devin is working, *Done* = PR opened
+- **Dashboard KPIs** show throughput (findings → tickets → PRs) and cost (ACU)
+- **Audit log** provides a per-finding paper trail from detection to PR
+- **GitHub PRs** are the tangible output — each links back to its SonarCloud finding
+
+### API endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/webhook/sonar` | POST | SonarCloud webhook receiver (HMAC validated) |
+| `/webhook/jira` | POST | Jira automation receiver (shared-secret validated) |
+| `/dashboard` | GET | Executive dashboard (HTML) |
+| `/api/results` | GET | Audit log entries (JSON, filterable) |
+| `/api/summary` | GET | KPI numbers (JSON) |
+| `/api/runs/{id}/cancel` | POST | Cancel all in-flight sessions for a scan run |
+| `/api/sessions/{id}/cancel` | POST | Cancel a single Devin session |
+| `/docs` | GET | OpenAPI interactive documentation |
 
 ## Project Structure
 
 ```
 aegis/
 ├── app/
-│   ├── main.py             # FastAPI entrypoint + lifespan
-│   ├── config.py           # Pydantic Settings (.env)
-│   ├── models.py           # Finding, SessionResult, AuditEntry
-│   ├── db.py               # SQLite audit log operations
+│   ├── main.py                 # FastAPI entrypoint + lifespan
+│   ├── config.py               # Pydantic Settings (.env loading, severity expansion)
+│   ├── models.py               # Finding, SessionResult dataclasses
+│   ├── db.py                   # SQLite audit log (aiosqlite)
 │   ├── routers/
-│   │   ├── webhook.py      # POST /webhook/sonar (HMAC validation)
-│   │   └── dashboard.py    # Dashboard + JSON APIs
+│   │   ├── webhook.py          # POST /webhook/sonar — HMAC validation, dispatch
+│   │   ├── jira_webhook.py     # POST /webhook/jira — ticket transition → Devin session
+│   │   └── dashboard.py        # GET /dashboard, /api/results, /api/summary, cancel
 │   ├── services/
-│   │   ├── sonar.py        # SonarCloud findings fetcher
-│   │   ├── github.py       # GitHub Issues creator
-│   │   ├── devin.py        # Devin session launcher + poller
-│   │   └── orchestrator.py # End-to-end remediation pipeline
+│   │   ├── orchestrator.py     # Run pipeline: fetch → dedup → create tickets
+│   │   ├── sonar.py            # SonarCloud API client (findings fetch)
+│   │   ├── devin.py            # Devin v3 API client (launch, poll, cancel, structured output)
+│   │   ├── github.py           # GitHub issue creator (with dedup)
+│   │   └── jira.py             # Jira Cloud client (create ticket, transition, lookup)
 │   └── templates/
-│       └── dashboard.html  # Jinja2 executive dashboard
+│       └── dashboard.html      # Jinja2 executive dashboard
 ├── tests/
-│   └── fixtures/
-│       └── sample_webhook.json
-├── simulate.py             # Simulation script
+│   ├── fixtures/
+│   │   └── sample_webhook.json # Canned SonarCloud webhook payload
+│   └── test_session_cap_e2e.py # End-to-end tests (mocked APIs)
+├── simulate.py                 # Replay webhook without live SonarCloud
 ├── Dockerfile
 ├── docker-compose.yml
-├── .env.example
-├── .gitignore
 ├── requirements.txt
-└── README.md
+└── .env.example
 ```
 
 ## Development
 
 ```bash
-# Local dev (without Docker)
+# Without Docker
 pip install -r requirements.txt
 cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
-## Design Decisions
+## Related Repository
 
-| Decision | Rationale |
-|----------|-----------|
-| **Devin v3 API** | Only version supporting `structured_output_schema`, `repos`, `tags`, ACU cap |
-| **1 session per finding** | Simpler tracking; batching is a future optimization |
-| **BLOCKER severity only** | Keeps demo to ~5-15 findings, ~75-225 ACU max |
-| **Session cap (MAX_SESSIONS_PER_RUN)** | Prevents runaway cost; all findings still recorded for reporting |
-| **VULNERABILITY + BUG types** | Demonstrates Devin API handling both security and code quality issues |
-| **Configurable severity & types** | `AEGIS_MIN_SEVERITY` + `AEGIS_ISSUE_TYPES` env vars show system scales without burning budget |
-| **SQLite** | Zero-config, demo-friendly; swappable for Postgres in production |
-| **Jinja2 dashboard** | Lightweight server-rendered; no frontend build step |
-| **No auto-merge** | PRs stop at "opened" — human reviews before merge |
-| **Hotspots skipped** | SonarCloud hotspots API is internal/unreliable; planned for v2 |
-
-## Stopping In-Flight Sessions
-
-To cancel all running Devin sessions for a specific scan run:
-
-```bash
-curl -X POST http://localhost:8000/api/runs/<scan_task_id>/cancel
-```
-
-This calls the Devin v3 cancel API for every `in_progress` session in that run and marks them as `cancelled` in the audit log.  Individual sessions can also be cancelled directly via the Devin API:
-
-```bash
-curl -X POST https://api.devin.ai/v3/organizations/$DEVIN_ORG_ID/sessions/$SESSION_ID/cancel \
-  -H "Authorization: Bearer $DEVIN_API_KEY"
-```
-
-## Future Extensions
-
-- **Hotspot remediation** — Once SonarCloud stabilizes the hotspots API
-- **Batch sessions** — Group same-file findings into one Devin session
-- **Postgres** — For production persistence
-- **Auth** — Dashboard authentication for public deployments
-- **Slack/email notifications** — Alert on scan completion
+| Repo | Purpose |
+|------|---------|
+| [ameer-khan05/superset-aegis-demo](https://github.com/ameer-khan05/superset-aegis-demo) | Apache Superset fork — target of remediation. Contains SonarCloud findings and Devin-opened PRs. |
