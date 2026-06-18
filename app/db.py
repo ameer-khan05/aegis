@@ -136,7 +136,7 @@ async def get_summary() -> dict[str, int | float]:
         row = await cursor.fetchone()
         total = row[0] if row else 0
 
-        cursor = await db.execute("SELECT COUNT(*) FROM audit_log WHERE devin_session_id IS NOT NULL")
+        cursor = await db.execute("SELECT COUNT(*) FROM audit_log WHERE status = 'in_progress'")
         row = await cursor.fetchone()
         sessions = row[0] if row else 0
 
