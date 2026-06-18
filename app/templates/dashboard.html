@@ -17,6 +17,7 @@
     .kpi-card .label { color: #94a3b8; font-size: 0.85rem; margin-top: 0.25rem; }
     .kpi-card.findings .value { color: #f59e0b; }
     .kpi-card.sessions .value { color: #3b82f6; }
+    .kpi-card.awaiting .value { color: #f59e0b; }
     .kpi-card.resolved .value { color: #22c55e; }
     .kpi-card.failed .value { color: #ef4444; }
     .kpi-card.skipped .value { color: #94a3b8; }
@@ -91,9 +92,9 @@
       <div class="value">{{ summary.findings_detected }}</div>
       <div class="label">Findings Detected</div>
     </div>
-    <div class="kpi-card sessions">
-      <div class="value">{{ summary.sessions_triggered }}</div>
-      <div class="label">Remediated This Run</div>
+    <div class="kpi-card awaiting">
+      <div class="value">{{ summary.pending }}</div>
+      <div class="label">Awaiting (Jira To Do)</div>
     </div>
     <div class="kpi-card resolved">
       <div class="value">{{ summary.resolved }}</div>
@@ -103,9 +104,9 @@
       <div class="value">{{ summary.failed }}</div>
       <div class="label">Failed</div>
     </div>
-    <div class="kpi-card skipped">
-      <div class="value">{{ summary.skipped }}</div>
-      <div class="label">Skipped (Cap)</div>
+    <div class="kpi-card sessions">
+      <div class="value">{{ summary.sessions_triggered }}</div>
+      <div class="label">In Progress</div>
     </div>
     <div class="kpi-card cost">
       <div class="value">{{ '%.1f' % summary.total_acu }}</div>
@@ -114,9 +115,9 @@
   </div>
 
   <div class="cap-note">
-    <strong>Caps:</strong> {{ max_findings_per_run }} findings fetched, {{ max_sessions_per_run }} sessions launched per run.
-    {{ summary.findings_detected }} detected, {{ summary.sessions_triggered }} remediated — {{ summary.skipped }} skipped intentionally.
-    Duplicate findings and repeat webhooks are automatically rejected.
+    <strong>Event-driven:</strong> Runs create Jira tickets only — no sessions auto-launched.
+    Move a ticket To Do → In Progress to trigger remediation (max {{ max_sessions_per_run }} concurrent sessions).
+    {{ summary.findings_detected }} detected, {{ summary.pending }} awaiting, {{ summary.sessions_triggered }} in progress, {{ summary.resolved }} resolved.
   </div>
 
   <!-- Filters -->
@@ -195,7 +196,7 @@
         <td><span class="badge {{ e.severity | lower }}">{{ e.severity }}</span></td>
         <td><span class="badge {{ e.status }}">{{ e.status | replace('_', ' ') }}</span></td>
         <td class="col-summary{% if not e.problem_summary %} empty{% endif %}">{{ e.problem_summary or '—' }}</td>
-        <td class="col-summary{% if not e.fix_summary %} empty{% endif %}">{{ e.fix_summary or ('Skipped — cap reached' if e.status == 'skipped' else '—') }}</td>
+        <td class="col-summary{% if not e.fix_summary %} empty{% endif %}">{{ e.fix_summary or ('Awaiting Jira transition' if e.status == 'pending' else '—') }}</td>
         <td title="{{ e.finding_file }}">{{ e.finding_file.split(':')[-1] if ':' in (e.finding_file or '') else e.finding_file }}</td>
         <td>{% if e.jira_ticket_key %}<a href="{{ e.jira_ticket_url }}" target="_blank">{{ e.jira_ticket_key }}</a>{% else %}—{% endif %}</td>
         <td>{% if e.github_issue_url %}<a href="{{ e.github_issue_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
