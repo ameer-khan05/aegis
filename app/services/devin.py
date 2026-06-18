@@ -108,7 +108,12 @@ async def poll_session(session_id: str) -> SessionResult | None:
     Returns parsed SessionResult or None on timeout.
     """
     start = time.monotonic()
-    terminal_details = {"usage_limit_exceeded", "out_of_credits", "error", "inactivity"}
+    # v3 API suspended status_detail values that indicate a terminal state
+    terminal_suspended_details = {
+        "usage_limit_exceeded", "out_of_credits", "out_of_quota",
+        "no_quota_allocation", "payment_declined", "org_usage_limit_exceeded",
+        "total_session_limit_exceeded", "error", "inactivity", "user_request",
+    }
     consecutive_errors = 0
     max_consecutive_errors = 10
 
@@ -149,15 +154,23 @@ async def poll_session(session_id: str) -> SessionResult | None:
             status = data.get("status", "")
             detail = data.get("status_detail", "")
 
+            # Terminal: session exited normally
             if status == "exit":
-                logger.info("Session %s completed successfully", session_id)
+                logger.info("Session %s exited successfully", session_id)
                 return _extract_result(data, session_id)
 
+            # Terminal: session errored
             if status == "error":
                 logger.warning("Session %s errored: %s", session_id, detail)
                 return _extract_result(data, session_id)
 
-            if status == "suspended" and detail in terminal_details:
+            # Terminal: session still "running" but task is finished
+            if status == "running" and detail == "finished":
+                logger.info("Session %s finished (status=running, detail=finished)", session_id)
+                return _extract_result(data, session_id)
+
+            # Terminal: suspended for a non-recoverable reason
+            if status == "suspended" and detail in terminal_suspended_details:
                 logger.warning("Session %s suspended: %s", session_id, detail)
                 return _extract_result(data, session_id)
 
@@ -185,27 +198,59 @@ async def cancel_session(session_id: str) -> bool:
         return False
 
 
+def _extract_pr_url_from_response(data: dict[str, object]) -> str | None:
+    """Extract the first PR URL from the v3 pull_requests[] array."""
+    prs = data.get("pull_requests")
+    if isinstance(prs, list):
+        for pr in prs:
+            if isinstance(pr, dict) and pr.get("pr_url"):
+                return str(pr["pr_url"])
+    return None
+
+
 def _extract_result(data: dict[str, object], session_id: str) -> SessionResult:
-    """Parse structured_output from session response, with fallback."""
+    """Parse structured_output from session response, with pull_requests fallback."""
     acus = float(data.get("acus_consumed", 0) or 0)
     structured = data.get("structured_output")
+
     if isinstance(structured, dict):
+        pr_url = structured.get("pr_url") or _extract_pr_url_from_response(data)
         return SessionResult(
             finding_key=str(structured.get("finding_key", "")),
             fixed=bool(structured.get("fixed", False)),
             tests_passed=bool(structured.get("tests_passed", False)),
-            pr_url=structured.get("pr_url"),  # type: ignore[arg-type]
+            pr_url=str(pr_url) if pr_url else None,
             failure_reason=structured.get("failure_reason"),  # type: ignore[arg-type]
             fix_summary=structured.get("fix_summary"),  # type: ignore[arg-type]
             acu_consumed=acus,
         )
 
+    # No structured output — check pull_requests[] for evidence of success
+    pr_url = _extract_pr_url_from_response(data)
     status = str(data.get("status", "error"))
+    detail = str(data.get("status_detail", ""))
+
+    # Session opened a PR but didn't produce structured output
+    if pr_url and status in ("exit", "running") and detail in ("", "finished"):
+        logger.info(
+            "Session %s has no structured_output but opened PR %s — marking fixed",
+            session_id, pr_url,
+        )
+        return SessionResult(
+            finding_key="",
+            fixed=True,
+            tests_passed=False,
+            pr_url=pr_url,
+            failure_reason=None,
+            fix_summary=None,
+            acu_consumed=acus,
+        )
+
     return SessionResult(
         finding_key="",
         fixed=False,
         tests_passed=False,
-        pr_url=None,
+        pr_url=pr_url,
         failure_reason=f"Session {session_id} ended with status={status}, no structured output",
         acu_consumed=acus,
     )

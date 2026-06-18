@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     AEGIS_ISSUE_TYPES: str = "VULNERABILITY,BUG"
     AEGIS_MAX_ACU: int = 15
     AEGIS_POLL_INTERVAL: int = 30  # seconds
-    AEGIS_SESSION_TIMEOUT: int = 1200  # 20 minutes
+    AEGIS_SESSION_TIMEOUT: int = 2700  # 45 minutes — sessions typically take 10-15 min
     MAX_FINDINGS_PER_RUN: int = 10  # cap on total findings fetched per run
     MAX_SESSIONS_PER_RUN: int = 5  # cap on Devin sessions launched per webhook run
 
