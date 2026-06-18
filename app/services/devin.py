@@ -109,13 +109,36 @@ async def poll_session(session_id: str) -> SessionResult | None:
     """
     start = time.monotonic()
     terminal_details = {"usage_limit_exceeded", "out_of_credits", "error", "inactivity"}
+    consecutive_errors = 0
+    max_consecutive_errors = 10
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    poll_timeout = httpx.Timeout(connect=15.0, read=30.0, write=15.0, pool=15.0)
+
+    async with httpx.AsyncClient(timeout=poll_timeout) as client:
         while (time.monotonic() - start) < settings.AEGIS_SESSION_TIMEOUT:
-            resp = await client.get(
-                f"{DEVIN_API}/v3/organizations/{settings.DEVIN_ORG_ID}/sessions/{session_id}",
-                headers={"Authorization": f"Bearer {settings.DEVIN_API_KEY}"},
-            )
+            try:
+                resp = await client.get(
+                    f"{DEVIN_API}/v3/organizations/{settings.DEVIN_ORG_ID}/sessions/{session_id}",
+                    headers={"Authorization": f"Bearer {settings.DEVIN_API_KEY}"},
+                )
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.TransportError) as exc:
+                consecutive_errors += 1
+                backoff = min(consecutive_errors * settings.AEGIS_POLL_INTERVAL, 120)
+                logger.warning(
+                    "Transient error polling session %s (%d/%d): %s — retrying in %ds",
+                    session_id, consecutive_errors, max_consecutive_errors,
+                    type(exc).__name__, backoff,
+                )
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.error(
+                        "Too many consecutive poll errors for session %s, giving up",
+                        session_id,
+                    )
+                    return None
+                await asyncio.sleep(backoff)
+                continue
+
+            consecutive_errors = 0
 
             if not resp.is_success:
                 logger.warning("Poll failed for %s: %s", session_id, resp.status_code)
