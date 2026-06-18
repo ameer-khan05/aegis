@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     DEVIN_ORG_ID: str
     DEVIN_USER_ID: str
 
+    # Jira (optional — leave blank to disable Jira integration)
+    JIRA_BASE_URL: str = ""
+    JIRA_EMAIL: str = ""
+    JIRA_API_TOKEN: str = ""
+    JIRA_PROJECT_KEY: str = "KAN"
+    JIRA_WEBHOOK_SECRET: str = ""
+
     # Aegis behaviour
     AEGIS_MIN_SEVERITY: str = "BLOCKER"
     AEGIS_ISSUE_TYPES: str = "VULNERABILITY,BUG"
@@ -32,6 +39,11 @@ class Settings(BaseSettings):
     AEGIS_SESSION_TIMEOUT: int = 1200  # 20 minutes
     MAX_FINDINGS_PER_RUN: int = 10  # cap on total findings fetched per run
     MAX_SESSIONS_PER_RUN: int = 5  # cap on Devin sessions launched per webhook run
+
+    @property
+    def jira_enabled(self) -> bool:
+        """Return True if all Jira settings are configured."""
+        return bool(self.JIRA_BASE_URL and self.JIRA_EMAIL and self.JIRA_API_TOKEN)
 
     @property
     def severity_filter(self) -> str:

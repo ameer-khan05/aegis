@@ -49,3 +49,5 @@ class AuditEntry(BaseModel):
     duration_seconds: int | None = None
     problem_summary: str | None = None
     fix_summary: str | None = None
+    jira_ticket_key: str | None = None
+    jira_ticket_url: str | None = None

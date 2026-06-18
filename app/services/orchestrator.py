@@ -9,6 +9,7 @@ from app.db import has_active_entry, has_scan_run, init_db, insert_entry, update
 from app.models import Finding
 from app.services.devin import cancel_session, launch_session, poll_session
 from app.services.github import create_issue
+from app.services.jira import create_ticket, transition_ticket
 from app.services.sonar import fetch_vulnerabilities
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ async def run_remediation(scan_task_id: str) -> None:
 async def _record_skipped(scan_task_id: str, finding: Finding) -> None:
     """Insert a 'skipped' audit entry for a finding that exceeded the session cap."""
     now = datetime.now(timezone.utc).isoformat()
-    entry = {
+    entry: dict[str, object] = {
         "timestamp": now,
         "scan_task_id": scan_task_id,
         "finding_key": finding.key,
@@ -131,15 +132,22 @@ async def _record_skipped(scan_task_id: str, finding: Finding) -> None:
         "failure_reason": f"Exceeded MAX_SESSIONS_PER_RUN ({settings.MAX_SESSIONS_PER_RUN})",
         "problem_summary": finding.message,
     }
+
+    # Create Jira ticket (stays in To Do — can be manually moved to trigger later)
+    jira = await create_ticket(finding)
+    if jira:
+        entry["jira_ticket_key"] = jira["key"]
+        entry["jira_ticket_url"] = jira["url"]
+
     await insert_entry(entry)
 
 
 async def _process_finding(scan_task_id: str, finding: Finding) -> None:
-    """Process a single finding: create issue, launch session, poll, record."""
+    """Process a single finding: create issue + Jira ticket, launch session, poll, record."""
     now = datetime.now(timezone.utc).isoformat()
 
     # Insert initial audit entry
-    entry = {
+    entry: dict[str, object] = {
         "timestamp": now,
         "scan_task_id": scan_task_id,
         "finding_key": finding.key,
@@ -150,6 +158,15 @@ async def _process_finding(scan_task_id: str, finding: Finding) -> None:
         "status": "pending",
         "problem_summary": finding.message,
     }
+
+    # Create Jira ticket
+    jira = await create_ticket(finding)
+    jira_key = ""
+    if jira:
+        jira_key = jira["key"]
+        entry["jira_ticket_key"] = jira_key
+        entry["jira_ticket_url"] = jira["url"]
+
     await insert_entry(entry)
 
     # Create GitHub issue
@@ -193,6 +210,10 @@ async def _process_finding(scan_task_id: str, finding: Finding) -> None:
         "fix_summary": result.fix_summary,
         "acu_consumed": result.acu_consumed,
     })
+
+    # Transition Jira ticket to Done if fix was successful
+    if result.fixed and result.pr_url and jira_key:
+        await transition_ticket(jira_key, "Done")
 
     logger.info(
         "Finding %s: status=%s fixed=%s pr=%s acu=%.2f",
