@@ -136,7 +136,7 @@ async def get_summary() -> dict[str, int | float]:
         row = await cursor.fetchone()
         total = row[0] if row else 0
 
-        cursor = await db.execute("SELECT COUNT(*) FROM audit_log WHERE devin_session_id IS NOT NULL")
+        cursor = await db.execute("SELECT COUNT(*) FROM audit_log WHERE status = 'in_progress'")
         row = await cursor.fetchone()
         sessions = row[0] if row else 0
 
@@ -148,9 +148,9 @@ async def get_summary() -> dict[str, int | float]:
         row = await cursor.fetchone()
         failed = row[0] if row else 0
 
-        cursor = await db.execute("SELECT COUNT(*) FROM audit_log WHERE status = 'skipped'")
+        cursor = await db.execute("SELECT COUNT(*) FROM audit_log WHERE status = 'pending'")
         row = await cursor.fetchone()
-        skipped = row[0] if row else 0
+        pending = row[0] if row else 0
 
         cursor = await db.execute("SELECT COUNT(*) FROM audit_log WHERE status = 'cancelled'")
         row = await cursor.fetchone()
@@ -165,7 +165,7 @@ async def get_summary() -> dict[str, int | float]:
         "sessions_triggered": sessions,
         "resolved": resolved,
         "failed": failed,
-        "skipped": skipped,
+        "pending": pending,
         "cancelled": cancelled,
         "total_acu": total_acu,
     }
