@@ -176,6 +176,46 @@ async def transition_ticket(ticket_key: str, target_name: str) -> bool:
         return False
 
 
+async def add_comment(ticket_key: str, body: str) -> bool:
+    """Post a plain-text comment to a Jira ticket.
+
+    Returns True if successful. Silently returns False if Jira is disabled
+    or the API call fails (non-critical path).
+    """
+    if not settings.jira_enabled:
+        return False
+
+    base = settings.JIRA_BASE_URL.rstrip("/")
+    payload = {
+        "body": {
+            "version": 1,
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": body}],
+                },
+            ],
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{base}/rest/api/3/issue/{ticket_key}/comment",
+            headers={
+                "Authorization": _auth_header(),
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        if resp.is_success:
+            logger.info("Added comment to %s", ticket_key)
+            return True
+
+        logger.error("Failed to add comment to %s: %s %s", ticket_key, resp.status_code, resp.text)
+        return False
+
+
 async def get_ticket_finding_key(ticket_key: str) -> str | None:
     """Look up the finding_key stored in a Jira ticket's description.
 
