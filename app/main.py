@@ -7,7 +7,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from app.db import init_db
-from app.routers import dashboard, webhook
+from app.routers import dashboard, jira_webhook, webhook
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
 
@@ -27,6 +27,7 @@ app = FastAPI(
 )
 
 app.include_router(webhook.router)
+app.include_router(jira_webhook.router)
 app.include_router(dashboard.router)
 
 

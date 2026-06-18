@@ -178,6 +178,7 @@
         <th>Problem</th>
         <th>Fix</th>
         <th>File</th>
+        <th>Jira</th>
         <th>Issue</th>
         <th>PR</th>
         <th>Cost (ACU)</th>
@@ -196,6 +197,7 @@
         <td class="col-summary{% if not e.problem_summary %} empty{% endif %}">{{ e.problem_summary or '—' }}</td>
         <td class="col-summary{% if not e.fix_summary %} empty{% endif %}">{{ e.fix_summary or ('Skipped — cap reached' if e.status == 'skipped' else '—') }}</td>
         <td title="{{ e.finding_file }}">{{ e.finding_file.split(':')[-1] if ':' in (e.finding_file or '') else e.finding_file }}</td>
+        <td>{% if e.jira_ticket_key %}<a href="{{ e.jira_ticket_url }}" target="_blank">{{ e.jira_ticket_key }}</a>{% else %}—{% endif %}</td>
         <td>{% if e.github_issue_url %}<a href="{{ e.github_issue_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
         <td>{% if e.pr_url %}<a href="{{ e.pr_url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
         <td>{% if e.acu_consumed %}{{ '%.2f' % e.acu_consumed }}{% else %}—{% endif %}</td>

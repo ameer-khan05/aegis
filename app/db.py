@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
     acu_consumed REAL DEFAULT 0.0,
     duration_seconds INTEGER,
     problem_summary TEXT,
-    fix_summary TEXT
+    fix_summary TEXT,
+    jira_ticket_key TEXT,
+    jira_ticket_url TEXT
 )
 """
 
@@ -51,6 +53,7 @@ async def insert_entry(entry: dict[str, object]) -> int:
         "devin_session_url", "status", "pr_url", "tests_passed",
         "failure_reason", "acu_consumed", "duration_seconds",
         "problem_summary", "fix_summary",
+        "jira_ticket_key", "jira_ticket_url",
     ]
     values = [entry.get(c) for c in cols]
     placeholders = ", ".join(["?"] * len(cols))
